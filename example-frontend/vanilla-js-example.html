@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slider PvP - Vanilla JS Example</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+
+    .wallet-section {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+    }
+
+    .wallet-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.3s;
+    }
+
+    button:hover:not(:disabled) {
+      background: #5568d3;
+      transform: translateY(-2px);
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    button.danger {
+      background: #dc3545;
+    }
+
+    button.success {
+      background: #28a745;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #555;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .section {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .section h2 {
+      margin-bottom: 20px;
+      color: #333;
+      font-size: 20px;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .status-box {
+      background: white;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .status-row:last-child {
+      border-bottom: none;
+    }
+
+    .status-label {
+      font-weight: 600;
+      color: #555;
+    }
+
+    .status-value {
+      color: #333;
+    }
+
+    .alert {
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+
+    .alert-error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .alert-success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 1s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .winnings-info {
+      background: #e7f3ff;
+      padding: 12px;
+      border-radius: 6px;
+      margin: 10px 0;
+      font-size: 14px;
+    }
+
+    .winnings-info div {
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎮 Slider PvP Wager</h1>
+
+    <!-- Wallet Section -->
+    <div class="wallet-section">
+      <div class="wallet-info">
+        <div>
+          <strong>Status:</strong>
+          <span id="walletStatus">Not Connected</span>
+        </div>
+        <button id="connectWallet">Connect Wallet</button>
+      </div>
+      <div id="walletAddress" class="hidden" style="margin-top: 10px; word-break: break-all;"></div>
+    </div>
+
+    <!-- Alerts -->
+    <div id="alertContainer"></div>
+
+    <!-- Create Wager Section -->
+    <div class="section">
+      <h2>Create New Wager</h2>
+      
+      <div class="form-group">
+        <label>Player 2 Address</label>
+        <input type="text" id="player2Address" placeholder="Enter Player 2 public key">
+      </div>
+
+      <div class="form-group">
+        <label>Arbiter Address</label>
+        <input type="text" id="arbiterAddress" placeholder="Enter arbiter public key">
+      </div>
+
+      <div class="form-group">
+        <label>Fee Recipient Address</label>
+        <input type="text" id="feeRecipientAddress" placeholder="Enter fee recipient public key">
+      </div>
+
+      <div class="form-group">
+        <label>Wager Amount (SOL)</label>
+        <input type="number" id="wagerAmount" value="0.1" step="0.01" min="0.001">
+      </div>
+
+      <div class="winnings-info" id="winningsInfo">
+        <div><strong>Total Pool:</strong> <span id="totalPool">0.2</span> SOL</div>
+        <div><strong>Winner Gets:</strong> <span id="winnerAmount">0.19</span> SOL (95%)</div>
+        <div><strong>Platform Fee:</strong> <span id="feeAmount">0.01</span> SOL (5%)</div>
+      </div>
+
+      <button id="createWager" class="success" style="width: 100%;">Create Wager</button>
+    </div>
+
+    <!-- Wager Actions Section -->
+    <div class="section">
+      <h2>Wager Actions</h2>
+      
+      <div class="button-grid">
+        <button id="depositPlayer1">Deposit (Player 1)</button>
+        <button id="depositPlayer2">Deposit (Player 2)</button>
+        <button id="checkStatus">Check Status</button>
+        <button id="declareWinner1" class="success">Winner: Player 1</button>
+        <button id="declareWinner2" class="success">Winner: Player 2</button>
+      </div>
+    </div>
+
+    <!-- Wager Status Section -->
+    <div class="section hidden" id="statusSection">
+      <h2>Wager Status</h2>
+      <div class="status-box" id="statusBox"></div>
+    </div>
+  </div>
+
+  <!-- Import Solana Web3.js and Anchor from CDN -->
+  <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+  <script src="https://unpkg.com/@coral-xyz/anchor@0.29.0/dist/browser/index.js"></script>
+
+  <script>
+    // Configuration
+    const PROGRAM_ID = new solanaWeb3.PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
+    const CLUSTER = 'devnet'; // Change to 'mainnet-beta' for production
+    const CONNECTION = new solanaWeb3.Connection(
+      solanaWeb3.clusterApiUrl(CLUSTER),
+      'confirmed'
+    );
+
+    // State
+    let wallet = null;
+    let provider = null;
+    let program = null;
+
+    // Get DOM elements
+    const connectWalletBtn = document.getElementById('connectWallet');
+    const walletStatus = document.getElementById('walletStatus');
+    const walletAddress = document.getElementById('walletAddress');
+    const alertContainer = document.getElementById('alertContainer');
+    const createWagerBtn = document.getElementById('createWager');
+    const depositPlayer1Btn = document.getElementById('depositPlayer1');
+    const depositPlayer2Btn = document.getElementById('depositPlayer2');
+    const checkStatusBtn = document.getElementById('checkStatus');
+    const declareWinner1Btn = document.getElementById('declareWinner1');
+    const declareWinner2Btn = document.getElementById('declareWinner2');
+    const wagerAmountInput = document.getElementById('wagerAmount');
+    const statusSection = document.getElementById('statusSection');
+    const statusBox = document.getElementById('statusBox');
+
+    // Update winnings calculation when amount changes
+    wagerAmountInput.addEventListener('input', (e) => {
+      const amount = parseFloat(e.target.value) || 0;
+      const totalPool = amount * 2;
+      const winnerAmount = totalPool * 0.95;
+      const feeAmount = totalPool * 0.05;
+      
+      document.getElementById('totalPool').textContent = totalPool.toFixed(3);
+      document.getElementById('winnerAmount').textContent = winnerAmount.toFixed(3);
+      document.getElementById('feeAmount').textContent = feeAmount.toFixed(3);
+    });
+
+    // Alert functions
+    function showAlert(message, type = 'error') {
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type}`;
+      alert.textContent = message;
+      alertContainer.appendChild(alert);
+      
+      setTimeout(() => {
+        alert.remove();
+      }, 5000);
+    }
+
+    // Connect Wallet
+    connectWalletBtn.addEventListener('click', async () => {
+      try {
+        if ('solana' in window) {
+          const solana = window.solana;
+          
+          if (solana.isPhantom) {
+            const response = await solana.connect();
+            wallet = solana;
+            
+            walletStatus.textContent = 'Connected ✅';
+            walletAddress.textContent = `Address: ${response.publicKey.toString()}`;
+            walletAddress.classList.remove('hidden');
+            connectWalletBtn.textContent = 'Connected';
+            connectWalletBtn.disabled = true;
+            
+            showAlert('Wallet connected successfully!', 'success');
+            
+            // Initialize program
+            // Note: In production, you'd load the actual IDL
+            // For this example, we're making raw transactions
+          } else {
+            showAlert('Please install Phantom wallet');
+          }
+        } else {
+          showAlert('Please install a Solana wallet (Phantom recommended)');
+        }
+      } catch (error) {
+        console.error('Error connecting wallet:', error);
+        showAlert('Failed to connect wallet: ' + error.message);
+      }
+    });
+
+    // Helper: Get Wager PDA
+    function getWagerPda(player1, player2) {
+      return solanaWeb3.PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('wager'),
+          player1.toBuffer(),
+          player2.toBuffer()
+        ],
+        PROGRAM_ID
+      );
+    }
+
+    // Create Wager
+    createWagerBtn.addEventListener('click', async () => {
+      if (!wallet) {
+        showAlert('Please connect your wallet first');
+        return;
+      }
+
+      try {
+        const player1 = wallet.publicKey;
+        const player2 = new solanaWeb3.PublicKey(document.getElementById('player2Address').value);
+        const arbiter = new solanaWeb3.PublicKey(document.getElementById('arbiterAddress').value);
+        const feeRecipient = new solanaWeb3.PublicKey(document.getElementById('feeRecipientAddress').value);
+        const wagerAmount = parseFloat(wagerAmountInput.value) * solanaWeb3.LAMPORTS_PER_SOL;
+
+        const [wagerPda] = getWagerPda(player1, player2);
+
+        console.log('Creating wager...');
+        console.log('Wager PDA:', wagerPda.toString());
+
+        // Note: In production, you'd use Anchor to build the instruction
+        // This is a simplified example
+        
+        showAlert('Transaction functionality requires Anchor IDL. See SliderPvpClient.ts for full implementation.', 'error');
+        
+        // Full implementation example is in SliderPvpClient.ts
+        // You would normally do:
+        // const tx = await program.methods.initializeWager(...).rpc();
+        
+      } catch (error) {
+        console.error('Error creating wager:', error);
+        showAlert('Failed to create wager: ' + error.message);
+      }
+    });
+
+    // Check Status
+    checkStatusBtn.addEventListener('click', async () => {
+      if (!wallet) {
+        showAlert('Please connect your wallet first');
+        return;
+      }
+
+      try {
+        const player1 = wallet.publicKey;
+        const player2Address = document.getElementById('player2Address').value;
+        
+        if (!player2Address) {
+          showAlert('Please enter Player 2 address');
+          return;
+        }
+
+        const player2 = new solanaWeb3.PublicKey(player2Address);
+        const [wagerPda] = getWagerPda(player1, player2);
+
+        console.log('Checking wager at PDA:', wagerPda.toString());
+
+        // Fetch account info
+        const accountInfo = await CONNECTION.getAccountInfo(wagerPda);
+
+        if (accountInfo) {
+          // Account exists - would need to deserialize the data with Anchor
+          statusSection.classList.remove('hidden');
+          statusBox.innerHTML = `
+            <div class="status-row">
+              <span class="status-label">Wager PDA:</span>
+              <span class="status-value">${wagerPda.toString()}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Account Exists:</span>
+              <span class="status-value">✅ Yes</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Data Length:</span>
+              <span class="status-value">${accountInfo.data.length} bytes</span>
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 4px;">
+              ℹ️ Full status decoding requires the Anchor IDL. Use SliderPvpClient.ts for complete functionality.
+            </div>
+          `;
+          showAlert('Wager account found!', 'success');
+        } else {
+          statusSection.classList.remove('hidden');
+          statusBox.innerHTML = `
+            <div class="status-row">
+              <span class="status-label">Wager PDA:</span>
+              <span class="status-value">${wagerPda.toString()}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Status:</span>
+              <span class="status-value">❌ Wager does not exist</span>
+            </div>
+          `;
+          showAlert('No wager found for these players');
+        }
+
+      } catch (error) {
+        console.error('Error checking status:', error);
+        showAlert('Failed to check status: ' + error.message);
+      }
+    });
+
+    // Deposit Player 1
+    depositPlayer1Btn.addEventListener('click', () => {
+      showAlert('Use SliderPvpClient.ts or the React component for full transaction support');
+    });
+
+    // Deposit Player 2
+    depositPlayer2Btn.addEventListener('click', () => {
+      showAlert('Use SliderPvpClient.ts or the React component for full transaction support');
+    });
+
+    // Declare Winner buttons
+    declareWinner1Btn.addEventListener('click', () => {
+      showAlert('Use SliderPvpClient.ts or the React component for full transaction support');
+    });
+
+    declareWinner2Btn.addEventListener('click', () => {
+      showAlert('Use SliderPvpClient.ts or the React component for full transaction support');
+    });
+
+    // Auto-connect if wallet is already connected
+    window.addEventListener('load', async () => {
+      if ('solana' in window && window.solana.isConnected) {
+        try {
+          const response = await window.solana.connect({ onlyIfTrusted: true });
+          wallet = window.solana;
+          walletStatus.textContent = 'Connected ✅';
+          walletAddress.textContent = `Address: ${response.publicKey.toString()}`;
+          walletAddress.classList.remove('hidden');
+          connectWalletBtn.textContent = 'Connected';
+          connectWalletBtn.disabled = true;
+        } catch (error) {
+          console.log('Auto-connect failed:', error);
+        }
+      }
+    });
+  </script>
+
+  <div style="text-align: center; margin-top: 30px; padding: 20px; background: #fff3cd; border-radius: 8px;">
+    <strong>⚠️ Note:</strong> This is a simplified example for demonstration. <br>
+    For full functionality, use the <code>SliderPvpClient.ts</code> TypeScript module with Anchor. <br>
+    See <code>WagerComponent.tsx</code> for a complete React implementation.
+  </div>
+</body>
+</html>
+

@@ -1,0 +1,20 @@
+[package]
+name = "slider-pvp"
+version = "0.1.0"
+description = "Trustless wager/escrow smart contract for Solana"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "slider_pvp"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.29.0"
+
