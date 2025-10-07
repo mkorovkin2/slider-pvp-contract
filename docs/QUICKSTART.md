@@ -160,7 +160,7 @@ async function quickTest() {
 
   console.log("✓ Generated test accounts");
 
-  // Derive wager PDA
+  // Derive wager PDA (stores game state)
   const [wagerPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [
       Buffer.from("wager"),
@@ -170,10 +170,21 @@ async function quickTest() {
     program.programId
   );
 
+  // Derive vault PDA (stores deposited SOL)
+  const [vaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("vault"),
+      player1.publicKey.toBuffer(),
+      player2.publicKey.toBuffer(),
+    ],
+    program.programId
+  );
+
   console.log("✓ Derived wager PDA:", wagerPda.toString());
+  console.log("✓ Derived vault PDA:", vaultPda.toString());
 
   // Initialize wager
-  const wagerAmount = new anchor.BN(0.1 * LAMPORTS_PER_SOL);
+  const wagerAmount = new anchor.BN(0.5 * LAMPORTS_PER_SOL);
   
   await program.methods
     .initializeWager(
@@ -185,6 +196,7 @@ async function quickTest() {
     )
     .accounts({
       wager: wagerPda,
+      vault: vaultPda,
       payer: provider.wallet.publicKey,
     })
     .rpc();
@@ -197,6 +209,7 @@ async function quickTest() {
     player1: wagerAccount.player1.toString(),
     player2: wagerAccount.player2.toString(),
     wagerAmount: wagerAccount.wagerAmount.toString(),
+    initializationCost: wagerAccount.initializationCost.toString(),
     isSettled: wagerAccount.isSettled,
   });
 

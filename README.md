@@ -4,7 +4,9 @@ A trustless wager/escrow smart contract for Solana that enables fair player-vs-p
 
 ## Overview
 
-This Solana smart contract acts as a trustless wager or escrow system between two participants. Both players deposit a fixed amount of SOL into the contract, and an authorized arbiter determines the winner within a 120-second window. The contract automatically distributes 95% of the pool to the winner and 5% to a fee recipient. 
+This Solana smart contract acts as a trustless wager or escrow system between two participants. Both players deposit a fixed amount of SOL into the contract, and an authorized arbiter determines the winner within a 120-second window. The contract automatically distributes 95% of the pool to the winner and 5% to a fee recipient.
+
+**Architecture:** Uses a dual-PDA design with a separate vault PDA for secure SOL storage and a wager PDA for state management. Initialization costs are automatically deducted from the final payout pool. 
 
 **Key Safety Features:**
 - If only one player deposits, they can get their funds back after 30 seconds (deposit timeout)
@@ -12,40 +14,46 @@ This Solana smart contract acts as a trustless wager or escrow system between tw
 
 ## Features
 
-- ✅ **Trustless Escrow**: Funds are held in a Program Derived Address (PDA)
-- ✅ **Automated Payouts**: 95% to winner, 5% to fee recipient
+- ✅ **Trustless Escrow**: Funds held in separate vault PDA (SOL-only storage)
+- ✅ **Dual-PDA Architecture**: State management in wager PDA, funds in vault PDA
+- ✅ **Automated Payouts**: 95% to winner, 5% to fee recipient (after initialization cost)
+- ✅ **Fair Cost Distribution**: Initialization rent automatically deducted from player pool
 - ✅ **Deposit Timeout Protection**: 30-second window for both players to deposit
 - ✅ **Game Timeout Protection**: 120-second window for arbiter to declare winner
 - ✅ **No-Show Refunds**: If opponent doesn't deposit within 30 seconds, get your money back
 - ✅ **Role-Based Access**: Only designated arbiter can declare winners
 - ✅ **Transparent On-Chain**: All rules enforced by smart contract
 - ✅ **Prevents Double-Spending**: Each player can only deposit once
+- ✅ **Direct Lamport Transfers**: Efficient SOL transfers without System Program overhead
 
 ## How It Works
 
 ### Normal Flow (Both Players Participate)
 
 1. **Initialize**: Create a wager with two player addresses, an arbiter, and a fee recipient
-2. **Deposit Phase** (30-second window): Both players deposit the agreed-upon SOL amount
+   - Creates wager PDA (stores game state)
+   - Creates vault PDA (stores deposited SOL)
+   - Calculates and tracks initialization cost (~0.002 SOL)
+2. **Deposit Phase** (30-second window): Both players deposit the agreed-upon SOL amount into vault PDA
 3. **Game Timer Starts**: Once both deposits are made, a 120-second countdown begins
 4. **Decision Window**: 
    - Arbiter can declare a winner (within 120 seconds)
-   - Winner receives 95% of the pool
-   - Fee recipient receives 5% of the pool
+   - Winner receives 95% of the pool (after deducting initialization cost)
+   - Fee recipient receives 5% of the pool (after deducting initialization cost)
 5. **Game Timeout Refund** (if needed): 
    - If no winner is declared within 120 seconds
    - Anyone can trigger a refund
-   - Both players receive their original deposits back
+   - Both players receive their deposits back (minus initialization cost split equally)
 
 ### No-Show Protection (One Player Doesn't Deposit)
 
-1. **Initialize**: Wager is created
-2. **Partial Deposit**: Only one player deposits within the first 30 seconds
+1. **Initialize**: Wager and vault PDAs are created
+2. **Partial Deposit**: Only one player deposits into vault within the first 30 seconds
 3. **Deposit Timeout**: After 30 seconds from wager creation
 4. **Cancel & Refund**:
    - Anyone can call `cancel_wager()` after 30 seconds
-   - The player who deposited receives their full amount back
-   - No penalty for the depositing player
+   - The player who deposited receives their amount back (minus initialization cost)
+   - Initialization cost (~0.002 SOL) is deducted since opponent didn't show
 
 ## Project Structure
 
@@ -100,11 +108,22 @@ import { Program } from "@coral-xyz/anchor";
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 
 // Initialize wager
-const wagerAmount = new anchor.BN(0.1 * LAMPORTS_PER_SOL);
+const wagerAmount = new anchor.BN(0.5 * LAMPORTS_PER_SOL); // 0.5 SOL per player
 
+// Derive wager PDA (stores game state)
 const [wagerPda] = PublicKey.findProgramAddressSync(
   [
     Buffer.from("wager"),
+    player1.publicKey.toBuffer(),
+    player2.publicKey.toBuffer(),
+  ],
+  program.programId
+);
+
+// Derive vault PDA (stores deposited SOL)
+const [vaultPda] = PublicKey.findProgramAddressSync(
+  [
+    Buffer.from("vault"),
     player1.publicKey.toBuffer(),
     player2.publicKey.toBuffer(),
   ],
@@ -121,6 +140,7 @@ await program.methods
   )
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     payer: payer.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -131,6 +151,7 @@ await program.methods
   .depositPlayer1()
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     player1: player1.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -142,6 +163,7 @@ await program.methods
   .declareWinner(1) // 1 for player1, 2 for player2
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     arbiter: arbiter.publicKey,
     winnerAccount: player1.publicKey,
     feeRecipient: feeRecipient.publicKey,
@@ -155,6 +177,7 @@ await program.methods
   .cancelWager()
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     player1: player1.publicKey,
     player2: player2.publicKey,
     systemProgram: SystemProgram.programId,
@@ -250,14 +273,19 @@ anchor test
 
 ## Security Features
 
-1. **PDA-Based Escrow**: Funds held in Program Derived Address with no private key
-2. **Role-Based Permissions**: Only arbiter can declare winner
-3. **Dual Time-Lock Protection**: 
+1. **Dual-PDA Architecture**: 
+   - Wager PDA (state storage) - holds game logic and validation
+   - Vault PDA (SOL storage) - holds deposited funds separate from data
+   - No private keys - all funds controlled by program logic
+2. **Direct Lamport Transfers**: Efficient fund transfers via lamport manipulation
+3. **Role-Based Permissions**: Only arbiter can declare winner
+4. **Dual Time-Lock Protection**: 
    - Deposit timeout (30s) protects against no-show opponents
    - Game timeout (120s) protects against arbiter failure
-4. **State Validation**: Prevents double deposits and double settlements
-5. **Deterministic PDAs**: Unique wager account per player pair
-6. **No Fund Lockup**: Players can always retrieve funds via timeout mechanisms
+5. **State Validation**: Prevents double deposits and double settlements
+6. **Deterministic PDAs**: Unique wager and vault accounts per player pair
+7. **No Fund Lockup**: Players can always retrieve funds via timeout mechanisms
+8. **Fair Cost Distribution**: Initialization rent costs deducted from player pool, not from payer
 
 ## Configuration
 
@@ -275,6 +303,38 @@ const FEE_PERCENTAGE: u64 = 5;                 // 5% to fee recipient
 - `TIMEOUT_SECONDS`: How long arbiter has to declare winner after both players deposit
 
 Modify these values before deployment to adjust contract behavior.
+
+## Cost Structure
+
+### Initialization Costs
+When a wager is created, two PDAs are initialized:
+- **Wager PDA** (~0.00116 SOL rent) - stores game state
+- **Vault PDA** (~0.00089 SOL rent) - stores deposited funds
+- **Total**: ~0.00205 SOL per wager
+
+### Cost Distribution
+The initialization cost is **automatically deducted from the player pool** before payouts:
+
+**Example: 0.5 SOL per player**
+```
+Total deposited: 1.0 SOL (0.5 + 0.5)
+Initialization cost: -0.002 SOL
+Distributable pool: 0.998 SOL
+
+Winner (95%): 0.9481 SOL (net: +0.4481 SOL profit)
+Fee (5%): 0.0499 SOL
+Remaining: 0.002 SOL (stays in vault as rent)
+```
+
+**Impact by Wager Size:**
+| Per Player | Total Pool | Init Cost | % Impact |
+|------------|------------|-----------|----------|
+| 0.1 SOL | 0.2 SOL | 0.002 SOL | 1.0% |
+| 0.5 SOL | 1.0 SOL | 0.002 SOL | 0.2% |
+| 1.0 SOL | 2.0 SOL | 0.002 SOL | 0.1% |
+| 10 SOL | 20 SOL | 0.002 SOL | 0.01% |
+
+**Note:** Larger wagers have negligible initialization cost impact.
 
 ## Deployment
 

@@ -17,13 +17,17 @@ Phase 1: INITIALIZATION
 │  • player2: Pubkey                                          │
 │  • arbiter: Pubkey                                          │
 │  • fee_recipient: Pubkey                                    │
-│  • wager_amount: u64 (e.g., 0.1 SOL)                       │
+│  • wager_amount: u64 (e.g., 0.5 SOL)                       │
 │                                                              │
-│  Result: Wager PDA created                                   │
+│  Result: Two PDAs created                                    │
+│  • Wager PDA - stores game state                           │
+│  • Vault PDA - stores deposited SOL                        │
+│                                                              │
 │  State: player1_deposited = false                           │
 │         player2_deposited = false                           │
 │         start_time = 0                                       │
 │         is_settled = false                                   │
+│         initialization_cost = ~0.002 SOL (calculated)       │
 └──────────────────────────────────────────────────────────────┘
                           ↓
 
@@ -31,7 +35,7 @@ Phase 2: DEPOSITS (Order doesn't matter)
 ┌──────────────────────────────────────────────────────────────┐
 │  Player 1                    │  Player 2                     │
 │  Calls: deposit_player1()    │  Calls: deposit_player2()     │
-│  Transfers: 0.1 SOL → PDA    │  Transfers: 0.1 SOL → PDA     │
+│  Transfers: 0.5 SOL → Vault  │  Transfers: 0.5 SOL → Vault   │
 │                              │                               │
 │  State: player1_deposited    │  State: player2_deposited     │
 │         = true               │         = true                │
@@ -46,7 +50,8 @@ Phase 3: DECISION WINDOW (120 seconds)
 ┌──────────────────────────────────────────────────────────────┐
 │                     ⏱️  TIMER RUNNING                         │
 │                                                              │
-│  PDA Balance: 0.2 SOL (0.1 from each player)                │
+│  Vault Balance: 1.0 SOL (0.5 from each player)              │
+│  Wager PDA: Tracks state (no SOL stored)                   │
 │  Start Time: Unix timestamp                                  │
 │  Deadline: start_time + 120 seconds                         │
 └──────────────────────────────────────────────────────────────┘
@@ -79,10 +84,13 @@ PATH A: WINNER DECLARED
 ┌──────────────────────────────────────────────────────────────┐
 │  DISTRIBUTION                                                │
 │                                                              │
-│  Total Pool: 0.2 SOL                                        │
+│  Vault Balance: 1.0 SOL (0.5 from each player)             │
+│  Initialization Cost: ~0.002 SOL (deducted)                │
+│  Distributable Pool: 0.998 SOL                             │
 │                                                              │
-│  Transfer 1: 0.19 SOL (95%) → Winner                        │
-│  Transfer 2: 0.01 SOL (5%)  → Fee Recipient                │
+│  Transfer 1: 0.9481 SOL (95%) → Winner                     │
+│  Transfer 2: 0.0499 SOL (5%)  → Fee Recipient              │
+│  Remaining: ~0.002 SOL (stays in vault as rent)           │
 │                                                              │
 │  State: winner = 1 or 2                                     │
 │         is_settled = true                                    │
@@ -91,10 +99,10 @@ PATH A: WINNER DECLARED
 ┌──────────────────────────────────────────────────────────────┐
 │  ✅ SETTLEMENT COMPLETE                                      │
 │                                                              │
-│  Winner Balance: +0.19 SOL                                  │
-│  Fee Recipient Balance: +0.01 SOL                           │
-│  Loser Balance: -0.1 SOL                                    │
-│  PDA Balance: ~0 SOL (may have rent-exempt minimum)        │
+│  Winner Balance: +0.4481 SOL (net: 0.5 deposited)          │
+│  Fee Recipient Balance: +0.0499 SOL                         │
+│  Loser Balance: -0.5 SOL                                    │
+│  Vault Balance: ~0.002 SOL (rent-exempt minimum)           │
 └──────────────────────────────────────────────────────────────┘
 
 
@@ -115,10 +123,13 @@ PATH B: TIMEOUT EXPIRES
 ┌──────────────────────────────────────────────────────────────┐
 │  REFUND                                                      │
 │                                                              │
-│  Total Pool: 0.2 SOL                                        │
+│  Vault Balance: 1.0 SOL (0.5 from each player)             │
+│  Initialization Cost: ~0.002 SOL (deducted)                │
+│  Distributable: 0.998 SOL                                   │
 │                                                              │
-│  Transfer 1: 0.1 SOL → Player 1                             │
-│  Transfer 2: 0.1 SOL → Player 2                             │
+│  Transfer 1: 0.499 SOL → Player 1                           │
+│  Transfer 2: 0.499 SOL → Player 2                           │
+│  Remaining: ~0.002 SOL (stays in vault as rent)            │
 │                                                              │
 │  State: is_settled = true                                    │
 │         winner = None                                        │
@@ -127,9 +138,9 @@ PATH B: TIMEOUT EXPIRES
 ┌──────────────────────────────────────────────────────────────┐
 │  ✅ REFUND COMPLETE                                          │
 │                                                              │
-│  Player 1 Balance: ±0 SOL (refunded)                        │
-│  Player 2 Balance: ±0 SOL (refunded)                        │
-│  PDA Balance: ~0 SOL (may have rent-exempt minimum)        │
+│  Player 1 Balance: -0.001 SOL (net after refund)           │
+│  Player 2 Balance: -0.001 SOL (net after refund)           │
+│  Vault Balance: ~0.002 SOL (rent-exempt minimum)           │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -271,17 +282,23 @@ SCENARIO 1: Winner Declared (Player 1 Wins)
 
 Player 1 Wallet                 Player 2 Wallet
      │                               │
-     │ -0.1 SOL                     │ -0.1 SOL
+     │ -0.5 SOL                     │ -0.5 SOL
      ↓                               ↓
-              Wager PDA (Escrow)
-                  0.2 SOL
+              Vault PDA (Escrow)
+                  1.0 SOL
                      │
-         ┌───────────┴───────────┐
-         │                       │
-         │ 0.19 SOL (95%)       │ 0.01 SOL (5%)
-         ↓                       ↓
-    Player 1 Wallet         Fee Recipient
-    NET: +0.09 SOL         NET: +0.01 SOL
+     ┌───────────────┼───────────────┐
+     │               │               │
+     │  Deduct Init Cost (~0.002 SOL)│
+     │               │               │
+     │    Distributable: 0.998 SOL   │
+     │               │               │
+     ├───────────────┴───────────────┤
+     │                               │
+     │ 0.9481 SOL (95%)             │ 0.0499 SOL (5%)
+     ↓                               ↓
+Player 1 Wallet                Fee Recipient
+NET: +0.4481 SOL               NET: +0.0499 SOL
 
 
 SCENARIO 2: Timeout Refund
@@ -289,17 +306,23 @@ SCENARIO 2: Timeout Refund
 
 Player 1 Wallet                 Player 2 Wallet
      │                               │
-     │ -0.1 SOL                     │ -0.1 SOL
+     │ -0.5 SOL                     │ -0.5 SOL
      ↓                               ↓
-              Wager PDA (Escrow)
-                  0.2 SOL
+              Vault PDA (Escrow)
+                  1.0 SOL
                      │
-         ┌───────────┴───────────┐
-         │                       │
-         │ 0.1 SOL              │ 0.1 SOL
-         ↓                       ↓
-    Player 1 Wallet         Player 2 Wallet
-    NET: ±0 SOL             NET: ±0 SOL
+     ┌───────────────┼───────────────┐
+     │               │               │
+     │  Deduct Init Cost (~0.002 SOL)│
+     │               │               │
+     │    Distributable: 0.998 SOL   │
+     │               │               │
+     ├───────────────┴───────────────┤
+     │                               │
+     │ 0.499 SOL (50%)              │ 0.499 SOL (50%)
+     ↓                               ↓
+Player 1 Wallet                 Player 2 Wallet
+NET: -0.001 SOL                 NET: -0.001 SOL
 ```
 
 ## Integration Points

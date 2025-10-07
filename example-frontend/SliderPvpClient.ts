@@ -33,6 +33,8 @@ export interface WagerInfo {
   startTime: number;
   winner: number | null;
   isSettled: boolean;
+  initializationCost: number; // in SOL
+  netPayout: number; // in SOL (after init cost)
   timeRemaining: number | null;
   depositTimeRemaining: number | null;
 }
@@ -65,17 +67,18 @@ export class SliderPvpClient {
   }
 
   /**
-   * Derive the PDA for a wager account
+   * Derive the PDAs for wager and vault accounts
    */
-  getWagerPda(player1: PublicKey, player2: PublicKey): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('wager'),
-        player1.toBuffer(),
-        player2.toBuffer()
-      ],
+  getPDAs(player1: PublicKey, player2: PublicKey): { wagerPda: PublicKey; vaultPda: PublicKey } {
+    const [wagerPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('wager'), player1.toBuffer(), player2.toBuffer()],
       PROGRAM_ID
     );
+    const [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('vault'), player1.toBuffer(), player2.toBuffer()],
+      PROGRAM_ID
+    );
+    return { wagerPda, vaultPda };
   }
 
   /**
@@ -87,14 +90,15 @@ export class SliderPvpClient {
     arbiter: PublicKey,
     feeRecipient: PublicKey,
     wagerAmountSol: number
-  ): Promise<{ signature: string; wagerPda: PublicKey }> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+  ): Promise<{ signature: string; wagerPda: PublicKey; vaultPda: PublicKey }> {
+    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
     const wagerAmount = new BN(wagerAmountSol * LAMPORTS_PER_SOL);
 
     const signature = await this.program.methods
       .initializeWager(player1, player2, arbiter, feeRecipient, wagerAmount)
       .accounts({
         wager: wagerPda,
+        vault: vaultPda,
         payer: this.provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId,
       })
@@ -102,7 +106,7 @@ export class SliderPvpClient {
 
     await this.confirmTransaction(signature);
 
-    return { signature, wagerPda };
+    return { signature, wagerPda, vaultPda };
   }
 
   /**
@@ -112,12 +116,13 @@ export class SliderPvpClient {
     player1: PublicKey,
     player2: PublicKey
   ): Promise<string> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
 
     const signature = await this.program.methods
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
+        vault: vaultPda,
         player1: this.provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId,
       })
@@ -134,12 +139,13 @@ export class SliderPvpClient {
     player1: PublicKey,
     player2: PublicKey
   ): Promise<string> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
 
     const signature = await this.program.methods
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
+        vault: vaultPda,
         player2: this.provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId,
       })
@@ -158,7 +164,7 @@ export class SliderPvpClient {
     player2: PublicKey,
     winner: 1 | 2
   ): Promise<string> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
     const wagerAccount = await this.program.account.wager.fetch(wagerPda);
     
     const winnerAccount = winner === 1 ? wagerAccount.player1 : wagerAccount.player2;
@@ -167,6 +173,7 @@ export class SliderPvpClient {
       .declareWinner(winner)
       .accounts({
         wager: wagerPda,
+        vault: vaultPda,
         arbiter: this.provider.wallet.publicKey,
         winnerAccount: winnerAccount,
         feeRecipient: wagerAccount.feeRecipient,
@@ -185,12 +192,13 @@ export class SliderPvpClient {
     player1: PublicKey,
     player2: PublicKey
   ): Promise<string> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
 
     const signature = await this.program.methods
       .refund()
       .accounts({
         wager: wagerPda,
+        vault: vaultPda,
         player1: player1,
         player2: player2,
         systemProgram: web3.SystemProgram.programId,
@@ -208,12 +216,13 @@ export class SliderPvpClient {
     player1: PublicKey,
     player2: PublicKey
   ): Promise<string> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
 
     const signature = await this.program.methods
       .cancelWager()
       .accounts({
         wager: wagerPda,
+        vault: vaultPda,
         player1: player1,
         player2: player2,
         systemProgram: web3.SystemProgram.programId,
@@ -231,7 +240,7 @@ export class SliderPvpClient {
     player1: PublicKey,
     player2: PublicKey
   ): Promise<WagerStatus> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda } = this.getPDAs(player1, player2);
     
     try {
       const wagerAccount = await this.program.account.wager.fetch(wagerPda);
@@ -251,6 +260,9 @@ export class SliderPvpClient {
       const depositElapsed = now - creationTime;
       const depositTimeRemaining = Math.max(0, DEPOSIT_TIMEOUT_SECONDS - depositElapsed);
       
+      const totalPool = wagerAccount.wagerAmount.toNumber() * 2;
+      const initCost = wagerAccount.initializationCost.toNumber();
+      
       return {
         exists: true,
         data: {
@@ -265,6 +277,8 @@ export class SliderPvpClient {
           startTime: wagerAccount.startTime.toNumber(),
           winner: wagerAccount.winner,
           isSettled: wagerAccount.isSettled,
+          initializationCost: initCost / LAMPORTS_PER_SOL,
+          netPayout: (totalPool - initCost) / LAMPORTS_PER_SOL,
           timeRemaining,
           depositTimeRemaining,
         }
@@ -283,7 +297,7 @@ export class SliderPvpClient {
     player2: PublicKey,
     callback: (wagerData: WagerInfo | null) => void
   ): Promise<number> {
-    const [wagerPda] = this.getWagerPda(player1, player2);
+    const { wagerPda } = this.getPDAs(player1, player2);
     
     const subscriptionId = this.connection.onAccountChange(
       wagerPda,
@@ -303,6 +317,9 @@ export class SliderPvpClient {
           const depositElapsed = now - creationTime;
           const depositTimeRemaining = Math.max(0, DEPOSIT_TIMEOUT_SECONDS - depositElapsed);
           
+          const totalPool = wagerData.wagerAmount.toNumber() * 2;
+          const initCost = wagerData.initializationCost.toNumber();
+          
           callback({
             player1: wagerData.player1,
             player2: wagerData.player2,
@@ -315,6 +332,8 @@ export class SliderPvpClient {
             startTime: wagerData.startTime.toNumber(),
             winner: wagerData.winner,
             isSettled: wagerData.isSettled,
+            initializationCost: initCost / LAMPORTS_PER_SOL,
+            netPayout: (totalPool - initCost) / LAMPORTS_PER_SOL,
             timeRemaining,
             depositTimeRemaining,
           });
@@ -344,21 +363,26 @@ export class SliderPvpClient {
   }
 
   /**
-   * Calculate potential winnings
+   * Calculate potential winnings (accounting for initialization cost)
+   * @param wagerAmountSol - Amount each player deposits in SOL
+   * @param initializationCostSol - Initialization cost (default: ~0.002 SOL)
    */
-  calculateWinnings(wagerAmountSol: number): {
+  calculateWinnings(wagerAmountSol: number, initializationCostSol: number = 0.002): {
     winnerAmount: number;
     feeAmount: number;
     totalPool: number;
+    distributablePool: number;
   } {
     const totalPool = wagerAmountSol * 2;
-    const winnerAmount = totalPool * (WINNER_PERCENTAGE / 100);
-    const feeAmount = totalPool * (FEE_PERCENTAGE / 100);
+    const distributablePool = totalPool - initializationCostSol;
+    const winnerAmount = distributablePool * (WINNER_PERCENTAGE / 100);
+    const feeAmount = distributablePool * (FEE_PERCENTAGE / 100);
     
     return {
       winnerAmount,
       feeAmount,
       totalPool,
+      distributablePool,
     };
   }
 

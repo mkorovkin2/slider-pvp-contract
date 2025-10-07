@@ -103,9 +103,20 @@ anchor deploy --provider.cluster mainnet
 ### Initialize a Wager
 
 ```typescript
+// Derive wager PDA (stores game state)
 const [wagerPda] = PublicKey.findProgramAddressSync(
   [
     Buffer.from("wager"),
+    player1.publicKey.toBuffer(),
+    player2.publicKey.toBuffer(),
+  ],
+  program.programId
+);
+
+// Derive vault PDA (stores deposited SOL)
+const [vaultPda] = PublicKey.findProgramAddressSync(
+  [
+    Buffer.from("vault"),
     player1.publicKey.toBuffer(),
     player2.publicKey.toBuffer(),
   ],
@@ -118,10 +129,11 @@ await program.methods
     player2.publicKey,
     arbiter.publicKey,
     feeRecipient.publicKey,
-    new anchor.BN(0.1 * LAMPORTS_PER_SOL)
+    new anchor.BN(0.5 * LAMPORTS_PER_SOL) // 0.5 SOL per player
   )
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     payer: payer.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -136,6 +148,7 @@ await program.methods
   .depositPlayer1()
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     player1: player1.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -147,6 +160,7 @@ await program.methods
   .depositPlayer2()
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     player2: player2.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -161,6 +175,7 @@ await program.methods
   .declareWinner(1) // 1 for player1, 2 for player2
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     arbiter: arbiter.publicKey,
     winnerAccount: player1.publicKey, // or player2.publicKey
     feeRecipient: feeRecipient.publicKey,
@@ -177,6 +192,7 @@ await program.methods
   .refund()
   .accounts({
     wager: wagerPda,
+    vault: vaultPda,
     player1: player1.publicKey,
     player2: player2.publicKey,
     systemProgram: SystemProgram.programId,
