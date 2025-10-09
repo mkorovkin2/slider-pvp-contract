@@ -6,19 +6,19 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-slider_pvp = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+slider_pvp = "9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
 
 [programs.devnet]
-slider_pvp = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+slider_pvp = "9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
 
 [programs.mainnet]
-slider_pvp = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+slider_pvp = "9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

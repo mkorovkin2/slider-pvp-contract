@@ -13,7 +13,7 @@ import type { SliderPvp } from '../target/types/slider_pvp';
 import idl from '../target/idl/slider_pvp.json';
 
 // Update this with your deployed program ID
-const PROGRAM_ID = new PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
+const PROGRAM_ID = new PublicKey('9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT');
 
 // Contract constants
 export const TIMEOUT_SECONDS = 120;
