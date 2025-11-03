@@ -21,6 +21,7 @@ pub mod slider_pvp {
         arbiter: Pubkey,
         fee_recipient: Pubkey,
         wager_amount: u64,
+        game_id: u64,
     ) -> Result<()> {
         let wager = &mut ctx.accounts.wager;
         
@@ -38,6 +39,7 @@ pub mod slider_pvp {
         wager.arbiter = arbiter;
         wager.fee_recipient = fee_recipient;
         wager.wager_amount = wager_amount;
+        wager.game_id = game_id;
         wager.player1_deposited = false;
         wager.player2_deposited = false;
         wager.creation_time = Clock::get()?.unix_timestamp;
@@ -49,6 +51,7 @@ pub mod slider_pvp {
         wager.initialization_cost = total_initialization_cost;
         
         msg!("Wager initialized: {} SOL per player", wager_amount as f64 / 1_000_000_000.0);
+        msg!("Game ID: {}", game_id);
         msg!("Initialization cost: {} SOL (will be deducted from final payout)", total_initialization_cost as f64 / 1_000_000_000.0);
         msg!("Player 1: {}", player1);
         msg!("Player 2: {}", player2);
@@ -278,13 +281,13 @@ pub mod slider_pvp {
 }
 
 #[derive(Accounts)]
-#[instruction(player1: Pubkey, player2: Pubkey)]
+#[instruction(player1: Pubkey, player2: Pubkey, arbiter: Pubkey, fee_recipient: Pubkey, wager_amount: u64, game_id: u64)]
 pub struct InitializeWager<'info> {
     #[account(
         init,
         payer = payer,
         space = 8 + Wager::INIT_SPACE,
-        seeds = [b"wager", player1.as_ref(), player2.as_ref()],
+        seeds = [b"wager", player1.as_ref(), player2.as_ref(), game_id.to_le_bytes().as_ref()],
         bump
     )]
     pub wager: Account<'info, Wager>,
@@ -293,7 +296,7 @@ pub struct InitializeWager<'info> {
         init,
         payer = payer,
         space = 0,
-        seeds = [b"vault", player1.as_ref(), player2.as_ref()],
+        seeds = [b"vault", player1.as_ref(), player2.as_ref(), game_id.to_le_bytes().as_ref()],
         bump
     )]
     pub vault: AccountInfo<'info>,
@@ -306,14 +309,14 @@ pub struct InitializeWager<'info> {
 pub struct DepositPlayer1<'info> {
     #[account(
         mut,
-        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
     /// CHECK: Vault PDA for holding SOL deposits
     #[account(
         mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.vault_bump
     )]
     pub vault: AccountInfo<'info>,
@@ -326,14 +329,14 @@ pub struct DepositPlayer1<'info> {
 pub struct DepositPlayer2<'info> {
     #[account(
         mut,
-        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
     /// CHECK: Vault PDA for holding SOL deposits
     #[account(
         mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.vault_bump
     )]
     pub vault: AccountInfo<'info>,
@@ -346,14 +349,14 @@ pub struct DepositPlayer2<'info> {
 pub struct DeclareWinner<'info> {
     #[account(
         mut,
-        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
     /// CHECK: Vault PDA for holding SOL deposits
     #[account(
         mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.vault_bump
     )]
     pub vault: AccountInfo<'info>,
@@ -371,14 +374,14 @@ pub struct DeclareWinner<'info> {
 pub struct Refund<'info> {
     #[account(
         mut,
-        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
     /// CHECK: Vault PDA for holding SOL deposits
     #[account(
         mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.vault_bump
     )]
     pub vault: AccountInfo<'info>,
@@ -395,14 +398,14 @@ pub struct Refund<'info> {
 pub struct CancelWager<'info> {
     #[account(
         mut,
-        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"wager", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
     /// CHECK: Vault PDA for holding SOL deposits
     #[account(
         mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref()],
+        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
         bump = wager.vault_bump
     )]
     pub vault: AccountInfo<'info>,
@@ -423,6 +426,7 @@ pub struct Wager {
     pub arbiter: Pubkey,
     pub fee_recipient: Pubkey,
     pub wager_amount: u64,
+    pub game_id: u64,
     pub player1_deposited: bool,
     pub player2_deposited: bool,
     pub creation_time: i64,
