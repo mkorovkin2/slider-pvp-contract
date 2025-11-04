@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program::{transfer, Transfer};
 use anchor_lang::solana_program::sysvar::rent::Rent;
 
-declare_id!("9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT");
+declare_id!("vBhmPaZWr7ZxmaCnJ5KrRHfkzRD23MwoFFJfGKjx92Y");
 
 const TIMEOUT_SECONDS: i64 = 120;
 const DEPOSIT_TIMEOUT_SECONDS: i64 = 30;
