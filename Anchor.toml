@@ -9,7 +9,7 @@ skip-lint = false
 slider_pvp = "9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
 
 [programs.devnet]
-slider_pvp = "9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
+slider_pvp = "HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5"
 
 [programs.mainnet]
 slider_pvp = "9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
