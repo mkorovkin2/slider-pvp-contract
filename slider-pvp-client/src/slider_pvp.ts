@@ -53,33 +53,10 @@ export type SliderPvp = {
                 "kind": "account",
                 "path": "wager.player2",
                 "account": "wager"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
               },
               {
                 "kind": "account",
-                "path": "wager.player1",
-                "account": "wager"
-              },
-              {
-                "kind": "account",
-                "path": "wager.player2",
+                "path": "wager.game_id",
                 "account": "wager"
               }
             ]
@@ -91,6 +68,10 @@ export type SliderPvp = {
         },
         {
           "name": "player2",
+          "writable": true
+        },
+        {
+          "name": "payerAccount",
           "writable": true
         },
         {
@@ -140,33 +121,10 @@ export type SliderPvp = {
                 "kind": "account",
                 "path": "wager.player2",
                 "account": "wager"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
               },
               {
                 "kind": "account",
-                "path": "wager.player1",
-                "account": "wager"
-              },
-              {
-                "kind": "account",
-                "path": "wager.player2",
+                "path": "wager.game_id",
                 "account": "wager"
               }
             ]
@@ -182,6 +140,10 @@ export type SliderPvp = {
         },
         {
           "name": "feeRecipient",
+          "writable": true
+        },
+        {
+          "name": "payerAccount",
           "writable": true
         },
         {
@@ -236,33 +198,10 @@ export type SliderPvp = {
                 "kind": "account",
                 "path": "wager.player2",
                 "account": "wager"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
               },
               {
                 "kind": "account",
-                "path": "wager.player1",
-                "account": "wager"
-              },
-              {
-                "kind": "account",
-                "path": "wager.player2",
+                "path": "wager.game_id",
                 "account": "wager"
               }
             ]
@@ -320,33 +259,10 @@ export type SliderPvp = {
                 "kind": "account",
                 "path": "wager.player2",
                 "account": "wager"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
               },
               {
                 "kind": "account",
-                "path": "wager.player1",
-                "account": "wager"
-              },
-              {
-                "kind": "account",
-                "path": "wager.player2",
+                "path": "wager.game_id",
                 "account": "wager"
               }
             ]
@@ -402,32 +318,10 @@ export type SliderPvp = {
               {
                 "kind": "arg",
                 "path": "player2"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
               },
               {
                 "kind": "arg",
-                "path": "player1"
-              },
-              {
-                "kind": "arg",
-                "path": "player2"
+                "path": "gameId"
               }
             ]
           }
@@ -461,6 +355,10 @@ export type SliderPvp = {
         },
         {
           "name": "wagerAmount",
+          "type": "u64"
+        },
+        {
+          "name": "gameId",
           "type": "u64"
         }
       ]
@@ -505,33 +403,10 @@ export type SliderPvp = {
                 "kind": "account",
                 "path": "wager.player2",
                 "account": "wager"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
               },
               {
                 "kind": "account",
-                "path": "wager.player1",
-                "account": "wager"
-              },
-              {
-                "kind": "account",
-                "path": "wager.player2",
+                "path": "wager.game_id",
                 "account": "wager"
               }
             ]
@@ -543,6 +418,10 @@ export type SliderPvp = {
         },
         {
           "name": "player2",
+          "writable": true
+        },
+        {
+          "name": "payerAccount",
           "writable": true
         },
         {
@@ -653,7 +532,15 @@ export type SliderPvp = {
             "type": "pubkey"
           },
           {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
             "name": "wagerAmount",
+            "type": "u64"
+          },
+          {
+            "name": "gameId",
             "type": "u64"
           },
           {
@@ -684,10 +571,6 @@ export type SliderPvp = {
           },
           {
             "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "vaultBump",
             "type": "u8"
           },
           {

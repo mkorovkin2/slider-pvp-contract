@@ -16,10 +16,9 @@ describe("slider-pvp", () => {
   let feeRecipient: Keypair;
   let wagerPda: PublicKey;
   let wagerBump: number;
-  let vaultPda: PublicKey;
-  let vaultBump: number;
 
   const wagerAmount = new anchor.BN(0.1 * LAMPORTS_PER_SOL); // 0.1 SOL
+  const gameId = new anchor.BN(1); // Game ID for tests
 
   beforeEach(async () => {
     // Create fresh keypairs for each test
@@ -33,22 +32,13 @@ describe("slider-pvp", () => {
     await airdrop(provider.connection, player2.publicKey, 1 * LAMPORTS_PER_SOL);
     await airdrop(provider.connection, arbiter.publicKey, 1 * LAMPORTS_PER_SOL);
 
-    // Derive PDA for wager account
+    // Derive PDA for wager account (must include game_id as per contract)
     [wagerPda, wagerBump] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("wager"),
         player1.publicKey.toBuffer(),
         player2.publicKey.toBuffer(),
-      ],
-      program.programId
-    );
-
-    // Derive PDA for vault account
-    [vaultPda, vaultBump] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("vault"),
-        player1.publicKey.toBuffer(),
-        player2.publicKey.toBuffer(),
+        gameId.toArrayLike(Buffer, "le", 8),
       ],
       program.programId
     );
@@ -66,11 +56,11 @@ describe("slider-pvp", () => {
         player2.publicKey,
         arbiter.publicKey,
         feeRecipient.publicKey,
-        wagerAmount
+        wagerAmount,
+        gameId
       )
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         payer: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -102,7 +92,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -125,7 +114,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -147,7 +135,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -162,7 +149,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -183,7 +169,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -194,7 +179,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -203,37 +187,45 @@ describe("slider-pvp", () => {
 
     const player1BalanceBefore = await provider.connection.getBalance(player1.publicKey);
     const feeRecipientBalanceBefore = await provider.connection.getBalance(feeRecipient.publicKey);
+    const payerBalanceBefore = await provider.connection.getBalance(provider.wallet.publicKey);
 
     // Arbiter declares player 1 as winner
     await program.methods
       .declareWinner(1)
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         arbiter: arbiter.publicKey,
         winnerAccount: player1.publicKey,
         feeRecipient: feeRecipient.publicKey,
+        payerAccount: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([arbiter])
       .rpc();
 
-    const wagerAccount = await program.account.wager.fetch(wagerPda);
-    expect(wagerAccount.isSettled).to.be.true;
-    expect(wagerAccount.winner).to.equal(1);
+    // Wager account should be closed, so fetching should fail
+    try {
+      await program.account.wager.fetch(wagerPda);
+      expect.fail("Expected wager account to be closed");
+    } catch (error) {
+      // Account should be closed
+    }
 
     const player1BalanceAfter = await provider.connection.getBalance(player1.publicKey);
     const feeRecipientBalanceAfter = await provider.connection.getBalance(feeRecipient.publicKey);
+    const payerBalanceAfter = await provider.connection.getBalance(provider.wallet.publicKey);
 
     const totalPool = wagerAmount.toNumber() * 2;
     
-    // Initialization cost (~0.002 SOL) is deducted from pool before distribution
-    // Use approximate comparison since initialization cost varies slightly
+    // Winner gets exactly 95% of pool (no rent)
     const expectedWinnerAmount = Math.floor(totalPool * 0.95);
-    const expectedFeeAmount = totalPool - expectedWinnerAmount;
+    const expectedFeeAmount = Math.floor(totalPool * 0.05);
 
-    expect(player1BalanceAfter - player1BalanceBefore).to.be.closeTo(expectedWinnerAmount, 3000000); // within 0.003 SOL for init cost
-    expect(feeRecipientBalanceAfter - feeRecipientBalanceBefore).to.be.closeTo(expectedFeeAmount, 300000); // within 0.0003 SOL
+    // Winner gets exactly 95% of the pool
+    expect(player1BalanceAfter - player1BalanceBefore).to.equal(expectedWinnerAmount);
+    expect(feeRecipientBalanceAfter - feeRecipientBalanceBefore).to.be.closeTo(expectedFeeAmount, 100000);
+    // Payer gets rent back (around 0.00128352 SOL)
+    expect(payerBalanceAfter - payerBalanceBefore).to.be.greaterThan(1000000); // at least 0.001 SOL rent
   });
 
   it("Arbiter declares player 2 as winner", async () => {
@@ -244,7 +236,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -255,7 +246,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -264,37 +254,45 @@ describe("slider-pvp", () => {
 
     const player2BalanceBefore = await provider.connection.getBalance(player2.publicKey);
     const feeRecipientBalanceBefore = await provider.connection.getBalance(feeRecipient.publicKey);
+    const payerBalanceBefore = await provider.connection.getBalance(provider.wallet.publicKey);
 
     // Arbiter declares player 2 as winner
     await program.methods
       .declareWinner(2)
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         arbiter: arbiter.publicKey,
         winnerAccount: player2.publicKey,
         feeRecipient: feeRecipient.publicKey,
+        payerAccount: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .signers([arbiter])
       .rpc();
 
-    const wagerAccount = await program.account.wager.fetch(wagerPda);
-    expect(wagerAccount.isSettled).to.be.true;
-    expect(wagerAccount.winner).to.equal(2);
+    // Wager account should be closed, so fetching should fail
+    try {
+      await program.account.wager.fetch(wagerPda);
+      expect.fail("Expected wager account to be closed");
+    } catch (error) {
+      // Account should be closed
+    }
 
     const player2BalanceAfter = await provider.connection.getBalance(player2.publicKey);
     const feeRecipientBalanceAfter = await provider.connection.getBalance(feeRecipient.publicKey);
+    const payerBalanceAfter = await provider.connection.getBalance(provider.wallet.publicKey);
 
     const totalPool = wagerAmount.toNumber() * 2;
     
-    // Initialization cost (~0.002 SOL) is deducted from pool before distribution
-    // Use approximate comparison since initialization cost varies slightly
+    // Winner gets exactly 95% of pool (no rent)
     const expectedWinnerAmount = Math.floor(totalPool * 0.95);
-    const expectedFeeAmount = totalPool - expectedWinnerAmount;
+    const expectedFeeAmount = Math.floor(totalPool * 0.05);
 
-    expect(player2BalanceAfter - player2BalanceBefore).to.be.closeTo(expectedWinnerAmount, 3000000); // within 0.003 SOL for init cost
-    expect(feeRecipientBalanceAfter - feeRecipientBalanceBefore).to.be.closeTo(expectedFeeAmount, 300000); // within 0.0003 SOL
+    // Winner gets exactly 95% of the pool
+    expect(player2BalanceAfter - player2BalanceBefore).to.equal(expectedWinnerAmount);
+    expect(feeRecipientBalanceAfter - feeRecipientBalanceBefore).to.be.closeTo(expectedFeeAmount, 100000);
+    // Payer gets rent back (around 0.00128352 SOL)
+    expect(payerBalanceAfter - payerBalanceBefore).to.be.greaterThan(1000000); // at least 0.001 SOL rent
   });
 
   it("Fails when non-arbiter tries to declare winner", async () => {
@@ -305,7 +303,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -316,7 +313,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -329,10 +325,10 @@ describe("slider-pvp", () => {
         .declareWinner(1)
         .accounts({
           wager: wagerPda,
-          vault: vaultPda,
           arbiter: player1.publicKey,
           winnerAccount: player1.publicKey,
           feeRecipient: feeRecipient.publicKey,
+          payerAccount: provider.wallet.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([player1])
@@ -351,7 +347,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -362,7 +357,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -371,6 +365,7 @@ describe("slider-pvp", () => {
 
     const player1BalanceBefore = await provider.connection.getBalance(player1.publicKey);
     const player2BalanceBefore = await provider.connection.getBalance(player2.publicKey);
+    const payerBalanceBefore = await provider.connection.getBalance(provider.wallet.publicKey);
 
     // Wait for timeout (simulate by modifying the wager's start_time)
     // Note: In a real test, you'd need to wait 120 seconds or use a test validator with time manipulation
@@ -386,21 +381,30 @@ describe("slider-pvp", () => {
       .refund()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         player2: player2.publicKey,
+        payerAccount: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    const wagerAccount = await program.account.wager.fetch(wagerPda);
-    expect(wagerAccount.isSettled).to.be.true;
+    // Wager account should be closed
+    try {
+      await program.account.wager.fetch(wagerPda);
+      expect.fail("Expected wager account to be closed");
+    } catch (error) {
+      // Account should be closed
+    }
 
     const player1BalanceAfter = await provider.connection.getBalance(player1.publicKey);
     const player2BalanceAfter = await provider.connection.getBalance(player2.publicKey);
+    const payerBalanceAfter = await provider.connection.getBalance(provider.wallet.publicKey);
 
+    // Both players get their full wager back (exactly)
     expect(player1BalanceAfter - player1BalanceBefore).to.equal(wagerAmount.toNumber());
     expect(player2BalanceAfter - player2BalanceBefore).to.equal(wagerAmount.toNumber());
+    // Payer gets rent back
+    expect(payerBalanceAfter - payerBalanceBefore).to.be.greaterThan(1000000); // at least 0.001 SOL rent
     */
   });
 
@@ -412,7 +416,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -423,7 +426,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -438,6 +440,7 @@ describe("slider-pvp", () => {
           wager: wagerPda,
           player1: player1.publicKey,
           player2: player2.publicKey,
+          payerAccount: provider.wallet.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .rpc();
@@ -455,7 +458,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -487,7 +489,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -500,10 +501,10 @@ describe("slider-pvp", () => {
         .declareWinner(1)
         .accounts({
           wager: wagerPda,
-          vault: vaultPda,
           arbiter: arbiter.publicKey,
           winnerAccount: player1.publicKey,
           feeRecipient: feeRecipient.publicKey,
+          payerAccount: provider.wallet.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([arbiter])
@@ -522,7 +523,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -537,6 +537,7 @@ describe("slider-pvp", () => {
           wager: wagerPda,
           player1: player1.publicKey,
           player2: player2.publicKey,
+          payerAccount: provider.wallet.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .rpc();
@@ -554,7 +555,6 @@ describe("slider-pvp", () => {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -565,7 +565,6 @@ describe("slider-pvp", () => {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -580,6 +579,7 @@ describe("slider-pvp", () => {
           wager: wagerPda,
           player1: player1.publicKey,
           player2: player2.publicKey,
+          payerAccount: provider.wallet.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .rpc();
@@ -599,13 +599,13 @@ describe("slider-pvp", () => {
     await initializeWager();
 
     const player1BalanceBefore = await provider.connection.getBalance(player1.publicKey);
+    const payerBalanceBefore = await provider.connection.getBalance(provider.wallet.publicKey);
 
     // Player 1 deposits
     await program.methods
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -624,19 +624,27 @@ describe("slider-pvp", () => {
       .cancelWager()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         player2: player2.publicKey,
+        payerAccount: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    const wagerAccount = await program.account.wager.fetch(wagerPda);
-    expect(wagerAccount.isSettled).to.be.true;
+    // Wager account should be closed
+    try {
+      await program.account.wager.fetch(wagerPda);
+      expect.fail("Expected wager account to be closed");
+    } catch (error) {
+      // Account should be closed
+    }
 
     const player1BalanceAfter = await provider.connection.getBalance(player1.publicKey);
-    // Player 1 should get refunded (minus transaction fees)
+    const payerBalanceAfter = await provider.connection.getBalance(provider.wallet.publicKey);
+    // Player 1 should get full refund (minus transaction fees)
     expect(player1BalanceAfter).to.be.closeTo(player1BalanceBefore, 10000000); // within 0.01 SOL for fees
+    // Payer gets rent back
+    expect(payerBalanceAfter - payerBalanceBefore).to.be.greaterThan(1000000); // at least 0.001 SOL rent
     */
   });
 
@@ -644,13 +652,13 @@ describe("slider-pvp", () => {
     await initializeWager();
 
     const player2BalanceBefore = await provider.connection.getBalance(player2.publicKey);
+    const payerBalanceBefore = await provider.connection.getBalance(provider.wallet.publicKey);
 
     // Player 2 deposits
     await program.methods
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -669,24 +677,34 @@ describe("slider-pvp", () => {
       .cancelWager()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         player2: player2.publicKey,
+        payerAccount: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    const wagerAccount = await program.account.wager.fetch(wagerPda);
-    expect(wagerAccount.isSettled).to.be.true;
+    // Wager account should be closed
+    try {
+      await program.account.wager.fetch(wagerPda);
+      expect.fail("Expected wager account to be closed");
+    } catch (error) {
+      // Account should be closed
+    }
 
     const player2BalanceAfter = await provider.connection.getBalance(player2.publicKey);
-    // Player 2 should get refunded (minus transaction fees)
+    const payerBalanceAfter = await provider.connection.getBalance(provider.wallet.publicKey);
+    // Player 2 should get full refund (minus transaction fees)
     expect(player2BalanceAfter).to.be.closeTo(player2BalanceBefore, 10000000); // within 0.01 SOL for fees
+    // Payer gets rent back
+    expect(payerBalanceAfter - payerBalanceBefore).to.be.greaterThan(1000000); // at least 0.001 SOL rent
     */
   });
 
   it("Cancels wager when neither player deposited (requires time manipulation)", async () => {
     await initializeWager();
+
+    const payerBalanceBefore = await provider.connection.getBalance(provider.wallet.publicKey);
 
     console.log("Note: In production tests, wait 30+ seconds or manipulate validator time");
     console.log("Skipping actual cancel_wager call due to time constraint in tests");
@@ -700,16 +718,24 @@ describe("slider-pvp", () => {
       .cancelWager()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1.publicKey,
         player2: player2.publicKey,
+        payerAccount: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    const wagerAccount = await program.account.wager.fetch(wagerPda);
-    expect(wagerAccount.isSettled).to.be.true;
-    // No refunds needed since neither player deposited
+    // Wager account should be closed
+    try {
+      await program.account.wager.fetch(wagerPda);
+      expect.fail("Expected wager account to be closed");
+    } catch (error) {
+      // Account should be closed
+    }
+    
+    const payerBalanceAfter = await provider.connection.getBalance(provider.wallet.publicKey);
+    // No refunds to players since neither deposited, but payer gets rent back
+    expect(payerBalanceAfter - payerBalanceBefore).to.be.greaterThan(1000000); // at least 0.001 SOL rent
     */
   });
 });

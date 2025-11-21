@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program::{transfer, Transfer};
 use anchor_lang::solana_program::sysvar::rent::Rent;
 
-declare_id!("vBhmPaZWr7ZxmaCnJ5KrRHfkzRD23MwoFFJfGKjx92Y");
+declare_id!("9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT");
 
 const TIMEOUT_SECONDS: i64 = 120;
 const DEPOSIT_TIMEOUT_SECONDS: i64 = 30;
@@ -28,16 +28,16 @@ pub mod slider_pvp {
         require!(player1 != player2, ErrorCode::SamePlayer);
         require!(wager_amount > 0, ErrorCode::InvalidWagerAmount);
         
-        // Calculate total initialization cost (rent for wager + vault PDAs)
+        // Calculate initialization cost (rent for wager PDA only)
         let rent = Rent::get()?;
         let wager_rent = rent.minimum_balance(8 + std::mem::size_of::<Wager>());
-        let vault_rent = rent.minimum_balance(0); // Vault has no data
-        let total_initialization_cost = wager_rent.checked_add(vault_rent).unwrap();
+        let total_initialization_cost = wager_rent;
         
         wager.player1 = player1;
         wager.player2 = player2;
         wager.arbiter = arbiter;
         wager.fee_recipient = fee_recipient;
+        wager.payer = ctx.accounts.payer.key();
         wager.wager_amount = wager_amount;
         wager.game_id = game_id;
         wager.player1_deposited = false;
@@ -47,7 +47,6 @@ pub mod slider_pvp {
         wager.winner = None;
         wager.is_settled = false;
         wager.bump = ctx.bumps.wager;
-        wager.vault_bump = ctx.bumps.vault;
         wager.initialization_cost = total_initialization_cost;
         
         msg!("Wager initialized: {} SOL per player", wager_amount as f64 / 1_000_000_000.0);
@@ -72,13 +71,13 @@ pub mod slider_pvp {
             ErrorCode::UnauthorizedPlayer
         );
         
-        // Transfer SOL from player1 to vault PDA (not wager PDA)
+        // Transfer SOL from player1 to wager PDA
         let wager_amount = wager.wager_amount;
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             Transfer {
                 from: ctx.accounts.player1.to_account_info(),
-                to: ctx.accounts.vault.to_account_info(),
+                to: ctx.accounts.wager.to_account_info(),
             },
         );
         transfer(cpi_context, wager_amount)?;
@@ -109,13 +108,13 @@ pub mod slider_pvp {
             ErrorCode::UnauthorizedPlayer
         );
         
-        // Transfer SOL from player2 to vault PDA (not wager PDA)
+        // Transfer SOL from player2 to wager PDA
         let wager_amount = wager.wager_amount;
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             Transfer {
                 from: ctx.accounts.player2.to_account_info(),
-                to: ctx.accounts.vault.to_account_info(),
+                to: ctx.accounts.wager.to_account_info(),
             },
         );
         transfer(cpi_context, wager_amount)?;
@@ -158,11 +157,8 @@ pub mod slider_pvp {
         
         let total_pool = wager.wager_amount.checked_mul(2).unwrap();
         
-        // Deduct initialization cost from the pool before distribution
-        let distributable_pool = total_pool.checked_sub(wager.initialization_cost).unwrap();
-        
-        let winner_amount = distributable_pool.checked_mul(WINNER_PERCENTAGE).unwrap().checked_div(100).unwrap();
-        let fee_amount = distributable_pool.checked_sub(winner_amount).unwrap();
+        let winner_amount = total_pool.checked_mul(WINNER_PERCENTAGE).unwrap().checked_div(100).unwrap();
+        let fee_amount = total_pool.checked_sub(winner_amount).unwrap();
         
         let _winner_pubkey = if winner == 1 {
             wager.player1
@@ -170,13 +166,13 @@ pub mod slider_pvp {
             wager.player2
         };
         
-        // Transfer from vault using manual lamport manipulation
+        // Transfer from wager PDA using manual lamport manipulation
         // Transfer winner amount
-        **ctx.accounts.vault.try_borrow_mut_lamports()? -= winner_amount;
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= winner_amount;
         **ctx.accounts.winner_account.try_borrow_mut_lamports()? += winner_amount;
         
         // Transfer fee amount
-        **ctx.accounts.vault.try_borrow_mut_lamports()? -= fee_amount;
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= fee_amount;
         **ctx.accounts.fee_recipient.try_borrow_mut_lamports()? += fee_amount;
         
         let wager = &mut ctx.accounts.wager;
@@ -187,6 +183,13 @@ pub mod slider_pvp {
         msg!("Winner declared: Player {}", winner);
         msg!("Winner receives: {} SOL", winner_amount as f64 / 1_000_000_000.0);
         msg!("Fee: {} SOL", fee_amount as f64 / 1_000_000_000.0);
+        
+        // Close wager PDA and send remaining rent to payer
+        let remaining_lamports = ctx.accounts.wager.to_account_info().lamports();
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? = 0;
+        **ctx.accounts.payer_account.try_borrow_mut_lamports()? += remaining_lamports;
+        
+        msg!("Rent refunded to initializer: {} SOL", remaining_lamports as f64 / 1_000_000_000.0);
         
         Ok(())
     }
@@ -207,19 +210,16 @@ pub mod slider_pvp {
             ErrorCode::TimeoutNotExpired
         );
         
-        // Use vault seeds for transfers from vault
-        // Transfer from vault using manual lamport manipulation
-        // Deduct initialization cost from total pool before refunding
+        // Transfer from wager PDA using manual lamport manipulation
         let total_pool = wager.wager_amount.checked_mul(2).unwrap();
-        let distributable_pool = total_pool.checked_sub(wager.initialization_cost).unwrap();
-        let refund_amount = distributable_pool.checked_div(2).unwrap();
+        let refund_amount = total_pool.checked_div(2).unwrap();
         
-        // Refund player 1 from vault
-        **ctx.accounts.vault.try_borrow_mut_lamports()? -= refund_amount;
+        // Refund player 1 from wager
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
         **ctx.accounts.player1.try_borrow_mut_lamports()? += refund_amount;
         
-        // Refund player 2 from vault
-        **ctx.accounts.vault.try_borrow_mut_lamports()? -= refund_amount;
+        // Refund player 2 from wager
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
         **ctx.accounts.player2.try_borrow_mut_lamports()? += refund_amount;
         
         let wager = &mut ctx.accounts.wager;
@@ -227,6 +227,13 @@ pub mod slider_pvp {
         wager.is_settled = true;
         
         msg!("Refund issued to both players: {} SOL each", refund_amount as f64 / 1_000_000_000.0);
+        
+        // Close wager PDA and send remaining rent to payer
+        let remaining_lamports = ctx.accounts.wager.to_account_info().lamports();
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? = 0;
+        **ctx.accounts.payer_account.try_borrow_mut_lamports()? += remaining_lamports;
+        
+        msg!("Rent refunded to initializer: {} SOL", remaining_lamports as f64 / 1_000_000_000.0);
         
         Ok(())
     }
@@ -249,25 +256,19 @@ pub mod slider_pvp {
         
         let player1_deposited = wager.player1_deposited;
         let player2_deposited = wager.player2_deposited;
+        let refund_amount = wager.wager_amount;
         
-        // Deduct initialization cost from refund since opponent didn't show up
-        let refund_amount = wager.wager_amount.checked_sub(wager.initialization_cost).unwrap();
-        
-        // Refund using manual lamport manipulation
+        // Refund using manual lamport manipulation from wager PDA
         if player1_deposited {
-            **ctx.accounts.vault.try_borrow_mut_lamports()? -= refund_amount;
+            **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
             **ctx.accounts.player1.try_borrow_mut_lamports()? += refund_amount;
-            msg!("Player 1 refunded: {} SOL (after deducting {} SOL initialization cost)", 
-                refund_amount as f64 / 1_000_000_000.0,
-                wager.initialization_cost as f64 / 1_000_000_000.0);
+            msg!("Player 1 refunded: {} SOL", refund_amount as f64 / 1_000_000_000.0);
         }
         
         if player2_deposited {
-            **ctx.accounts.vault.try_borrow_mut_lamports()? -= refund_amount;
+            **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
             **ctx.accounts.player2.try_borrow_mut_lamports()? += refund_amount;
-            msg!("Player 2 refunded: {} SOL (after deducting {} SOL initialization cost)", 
-                refund_amount as f64 / 1_000_000_000.0,
-                wager.initialization_cost as f64 / 1_000_000_000.0);
+            msg!("Player 2 refunded: {} SOL", refund_amount as f64 / 1_000_000_000.0);
         }
         
         let wager = &mut ctx.accounts.wager;
@@ -275,6 +276,13 @@ pub mod slider_pvp {
         wager.is_settled = true;
         
         msg!("Wager cancelled due to incomplete deposits after {} seconds", DEPOSIT_TIMEOUT_SECONDS);
+        
+        // Close wager PDA and send remaining rent to payer
+        let remaining_lamports = ctx.accounts.wager.to_account_info().lamports();
+        **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? = 0;
+        **ctx.accounts.payer_account.try_borrow_mut_lamports()? += remaining_lamports;
+        
+        msg!("Rent refunded to initializer: {} SOL", remaining_lamports as f64 / 1_000_000_000.0);
         
         Ok(())
     }
@@ -291,15 +299,6 @@ pub struct InitializeWager<'info> {
         bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Vault PDA for holding SOL deposits (no data, just SOL storage)
-    #[account(
-        init,
-        payer = payer,
-        space = 0,
-        seeds = [b"vault", player1.as_ref(), player2.as_ref(), game_id.to_le_bytes().as_ref()],
-        bump
-    )]
-    pub vault: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -313,13 +312,6 @@ pub struct DepositPlayer1<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Vault PDA for holding SOL deposits
-    #[account(
-        mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
-        bump = wager.vault_bump
-    )]
-    pub vault: AccountInfo<'info>,
     #[account(mut)]
     pub player1: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -333,13 +325,6 @@ pub struct DepositPlayer2<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Vault PDA for holding SOL deposits
-    #[account(
-        mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
-        bump = wager.vault_bump
-    )]
-    pub vault: AccountInfo<'info>,
     #[account(mut)]
     pub player2: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -353,13 +338,6 @@ pub struct DeclareWinner<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Vault PDA for holding SOL deposits
-    #[account(
-        mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
-        bump = wager.vault_bump
-    )]
-    pub vault: AccountInfo<'info>,
     pub arbiter: Signer<'info>,
     /// CHECK: This is the winner account (either player1 or player2)
     #[account(mut)]
@@ -367,6 +345,9 @@ pub struct DeclareWinner<'info> {
     /// CHECK: This is the fee recipient account
     #[account(mut)]
     pub fee_recipient: AccountInfo<'info>,
+    /// CHECK: This is the payer who initialized the wager
+    #[account(mut)]
+    pub payer_account: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -378,19 +359,15 @@ pub struct Refund<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Vault PDA for holding SOL deposits
-    #[account(
-        mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
-        bump = wager.vault_bump
-    )]
-    pub vault: AccountInfo<'info>,
     /// CHECK: Player 1 account for refund
     #[account(mut)]
     pub player1: AccountInfo<'info>,
     /// CHECK: Player 2 account for refund
     #[account(mut)]
     pub player2: AccountInfo<'info>,
+    /// CHECK: This is the payer who initialized the wager
+    #[account(mut)]
+    pub payer_account: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -402,19 +379,15 @@ pub struct CancelWager<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Vault PDA for holding SOL deposits
-    #[account(
-        mut,
-        seeds = [b"vault", wager.player1.as_ref(), wager.player2.as_ref(), wager.game_id.to_le_bytes().as_ref()],
-        bump = wager.vault_bump
-    )]
-    pub vault: AccountInfo<'info>,
     /// CHECK: Player 1 account for refund
     #[account(mut)]
     pub player1: AccountInfo<'info>,
     /// CHECK: Player 2 account for refund
     #[account(mut)]
     pub player2: AccountInfo<'info>,
+    /// CHECK: This is the payer who initialized the wager
+    #[account(mut)]
+    pub payer_account: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -425,6 +398,7 @@ pub struct Wager {
     pub player2: Pubkey,
     pub arbiter: Pubkey,
     pub fee_recipient: Pubkey,
+    pub payer: Pubkey,
     pub wager_amount: u64,
     pub game_id: u64,
     pub player1_deposited: bool,
@@ -434,7 +408,6 @@ pub struct Wager {
     pub winner: Option<u8>,
     pub is_settled: bool,
     pub bump: u8,
-    pub vault_bump: u8,
     pub initialization_cost: u64,
 }
 
