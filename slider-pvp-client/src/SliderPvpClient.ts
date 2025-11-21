@@ -12,32 +12,8 @@ import { Program, AnchorProvider, web3, BN, Wallet } from '@coral-xyz/anchor';
 import type { SliderPvp } from '../target/types/slider_pvp';
 import idl from '../target/idl/slider_pvp.json';
 
-// Program IDs for different networks
-const PROGRAM_IDS = {
-  'devnet': '9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT',
-  'mainnet-beta': 'YOUR_MAINNET_PROGRAM_ID_WHEN_DEPLOYED',
-  'localnet': 'Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS' // default
-} as const;
-
-function detectCluster(rpcEndpoint: string): keyof typeof PROGRAM_IDS {
-  if (rpcEndpoint.includes('devnet')) return 'devnet';
-  if (rpcEndpoint.includes('mainnet')) return 'mainnet-beta';
-  if (rpcEndpoint.includes('localhost') || rpcEndpoint.includes('127.0.0.1')) return 'localnet';
-  throw new Error(`Cannot detect cluster from RPC endpoint: ${rpcEndpoint}`);
-}
-
-function getProgramId(connection: Connection, override?: PublicKey): PublicKey {
-  if (override) return override;
-  
-  const cluster = detectCluster(connection.rpcEndpoint);
-  const programIdStr = PROGRAM_IDS[cluster];
-  
-  if (!programIdStr || programIdStr === 'YOUR_MAINNET_PROGRAM_ID_WHEN_DEPLOYED') {
-    throw new Error(`Program ID not configured for cluster: ${cluster}`);
-  }
-  
-  return new PublicKey(programIdStr);
-}
+// Update this with your deployed program ID
+const PROGRAM_ID = new PublicKey('9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT');
 
 // Contract constants
 export const TIMEOUT_SECONDS = 120;
@@ -72,18 +48,9 @@ export class SliderPvpClient {
   private program: Program<SliderPvp>;
   private provider: AnchorProvider;
   private connection: Connection;
-  private programId: PublicKey;
 
-  constructor(
-    connection: Connection, 
-    wallet: Wallet, 
-    programId?: PublicKey
-  ) {
+  constructor(connection: Connection, wallet: Wallet) {
     this.connection = connection;
-    
-    // Auto-detect program ID based on connection or use provided override
-    this.programId = getProgramId(connection, programId);
-    
     this.provider = new AnchorProvider(
       connection,
       wallet,
@@ -94,7 +61,7 @@ export class SliderPvpClient {
     );
     this.program = new Program<SliderPvp>(
       idl as any,
-      this.programId,
+      PROGRAM_ID,
       this.provider
     );
   }
@@ -105,27 +72,13 @@ export class SliderPvpClient {
   getPDAs(player1: PublicKey, player2: PublicKey): { wagerPda: PublicKey; vaultPda: PublicKey } {
     const [wagerPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('wager'), player1.toBuffer(), player2.toBuffer()],
-      this.programId
+      PROGRAM_ID
     );
     const [vaultPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('vault'), player1.toBuffer(), player2.toBuffer()],
-      this.programId
+      PROGRAM_ID
     );
     return { wagerPda, vaultPda };
-  }
-
-  /**
-   * Get the current program ID being used by this client instance
-   */
-  getProgramId(): PublicKey {
-    return this.programId;
-  }
-
-  /**
-   * Get the detected cluster name
-   */
-  getCluster(): string {
-    return detectCluster(this.connection.rpcEndpoint);
   }
 
   /**

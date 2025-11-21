@@ -176,7 +176,13 @@ pub fn collect_fees(ctx: Context<CollectFees>) -> Result<()> {
 - **Effort:** Medium (requires contract redeployment)
 - **Timeline:** Should be fixed before mainnet
 
-### **Issue #2: Scalability (IMPORTANT)**  
+### **✅ Issue #2: Program ID Management (COMPLETED)**
+- **Problem:** Hardcoded devnet program ID in client
+- **Impact:** Client wouldn't work on mainnet  
+- **Solution:** Constructor-based auto-detection implemented
+- **Status:** ✅ **COMPLETED** - SliderPvpClient now auto-detects environment
+
+### **Issue #3: Scalability (IMPORTANT)**  
 - **Impact:** Becomes critical at 10+ concurrent wagers
 - **Current Scale:** Not an issue yet (single test user)
 - **Effort:** Low (frontend/backend only for Option A)
@@ -185,6 +191,18 @@ pub fn collect_fees(ctx: Context<CollectFees>) -> Result<()> {
 ---
 
 ## 🛠️ **Implementation Plan**
+
+### **✅ Phase 0: Program ID Management (COMPLETED)**
+1. **✅ Modified SliderPvpClient.ts:**
+   - Added constructor parameter for optional program ID override
+   - Implemented auto-detection based on RPC endpoint
+   - Added helper methods: getProgramId(), getCluster()
+   - Maintained backward compatibility
+
+2. **✅ Tested auto-detection:**
+   - Verified devnet detection works correctly
+   - Confirmed error handling for unconfigured networks
+   - Validated program ID override functionality
 
 ### **Phase 1: Fix Fee Structure (Contract Change)**
 1. **Modify `declare_winner()` logic:**
