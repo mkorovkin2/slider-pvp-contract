@@ -108,9 +108,10 @@ const { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = requ
 const fs = require('fs');
 
 // Configuration
-const PROGRAM_ID = new PublicKey("9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT");
+const PROGRAM_ID = new PublicKey("HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5");
 const DEVNET_URL = "https://api.devnet.solana.com";
 const WAGER_AMOUNT = 0.1 * LAMPORTS_PER_SOL; // 0.1 SOL per player
+const GAME_ID = new anchor.BN(Date.now()); // Unique game ID based on timestamp
 
 async function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -130,13 +131,13 @@ async function fullContractTest() {
       Uint8Array.from(JSON.parse(fs.readFileSync(process.env.HOME + "/.config/solana/id.json", "utf8")))
     );
     
-    // Load player wallets from devnet-testing directory
+    // Load player wallets from devnet-testing directory  
     const player1Keypair = Keypair.fromSecretKey(
-      Uint8Array.from(JSON.parse(fs.readFileSync("./devnet-testing/test-player1.json", "utf8")))
+      Uint8Array.from(JSON.parse(fs.readFileSync("devnet-testing/test-player1.json", "utf8")))
     );
     
     const player2Keypair = Keypair.fromSecretKey(
-      Uint8Array.from(JSON.parse(fs.readFileSync("./devnet-testing/test-player2.json", "utf8")))
+      Uint8Array.from(JSON.parse(fs.readFileSync("devnet-testing/test-player2.json", "utf8")))
     );
     
     console.log("📋 Participants:");
@@ -172,28 +173,21 @@ async function fullContractTest() {
   const program = anchor.workspace.SliderPvp;
   console.log(`   ✅ Connected to program: ${program.programId.toString()}`);
     
-    // Derive PDAs
-    console.log("\n🔑 Deriving PDAs...");
+    // Derive Wager PDA (no vault in single-PDA architecture)
+    console.log("\n🔑 Deriving Wager PDA...");
+    const gameIdBuffer = GAME_ID.toArrayLike(Buffer, 'le', 8);
     const [wagerPda] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("wager"),
         player1Keypair.publicKey.toBuffer(),
         player2Keypair.publicKey.toBuffer(),
+        gameIdBuffer,
       ],
       program.programId
     );
     
-    const [vaultPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("vault"),
-        player1Keypair.publicKey.toBuffer(),
-        player2Keypair.publicKey.toBuffer(),
-      ],
-      program.programId
-    );
-    
+    console.log(`   Game ID: ${GAME_ID.toString()}`);
     console.log(`   Wager PDA: ${wagerPda.toString()}`);
-    console.log(`   Vault PDA: ${vaultPda.toString()}`);
     
     // Check if wager already exists (cleanup from previous tests)
     try {
@@ -222,11 +216,11 @@ async function fullContractTest() {
         player2Keypair.publicKey,
         payerKeypair.publicKey, // arbiter
         payerKeypair.publicKey, // fee recipient
-        new anchor.BN(WAGER_AMOUNT)
+        new anchor.BN(WAGER_AMOUNT),
+        GAME_ID
       )
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         payer: payerKeypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -245,7 +239,6 @@ async function fullContractTest() {
       .depositPlayer1()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player1: player1Keypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -261,7 +254,6 @@ async function fullContractTest() {
       .depositPlayer2()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         player2: player2Keypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -275,9 +267,9 @@ async function fullContractTest() {
     console.log(`   Game started at: ${new Date(wagerAfterDeposits.startTime * 1000).toISOString()}`);
     console.log(`   Both deposited: ${wagerAfterDeposits.player1Deposited && wagerAfterDeposits.player2Deposited}`);
     
-    // Check vault balance
-    const vaultBalance = await connection.getBalance(vaultPda);
-    console.log(`   Vault contains: ${(vaultBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    // Check wager PDA balance (holds the SOL in single-PDA architecture)
+    const wagerBalance = await connection.getBalance(wagerPda);
+    console.log(`   Wager PDA contains: ${(wagerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
     
     // STEP 4: Arbiter declares winner (Player 1)
     console.log("\n🏆 STEP 4: Arbiter declaring Player 1 as winner...");
@@ -286,24 +278,23 @@ async function fullContractTest() {
       .declareWinner(1) // 1 = Player 1 wins
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         arbiter: payerKeypair.publicKey,
         winnerAccount: player1Keypair.publicKey, // Player 1 is the winner
         feeRecipient: payerKeypair.publicKey,
+        payerAccount: payerKeypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     
     console.log(`   ✅ Winner declared! Transaction: ${declareWinnerTx}`);
     
-    // Check final state
-    const finalWager = await program.account.wager.fetch(wagerPda);
+    // Note: Wager PDA is now closed (rent returned to payer)
     const finalBalances = await getBalances();
     
     console.log("\n📊 FINAL RESULTS:");
     console.log("=================");
-    console.log(`   Winner: Player ${finalWager.winner}`);
-    console.log(`   Wager settled: ${finalWager.isSettled}`);
+    console.log(`   Winner: Player 1`);
+    console.log(`   Wager PDA: Closed (rent returned to initializer)`);
     
     displayBalances(finalBalances, "Final Balances");
     
@@ -317,9 +308,9 @@ async function fullContractTest() {
     console.log(`   Player 2 (loser):  ${player2Change > 0 ? '+' : ''}${player2Change.toFixed(4)} SOL`);
     console.log(`   Payer/Fee Recipient: ${payerChange > 0 ? '+' : ''}${payerChange.toFixed(4)} SOL`);
     
-    // Final vault balance (should be just rent)
-    const finalVaultBalance = await connection.getBalance(vaultPda);
-    console.log(`   Vault remaining: ${(finalVaultBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL (rent reserve)`);
+    // Wager PDA should be closed (balance should be 0)
+    const finalWagerBalance = await connection.getBalance(wagerPda);
+    console.log(`   Wager PDA final balance: ${(finalWagerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL (should be 0)`);
     
     console.log("\n🎉 FULL CONTRACT TEST COMPLETED SUCCESSFULLY! 🎉");
     console.log("===============================================");

@@ -30,7 +30,7 @@
  * ```
  * 
  * 🔧 REQUIREMENTS:
- * • Deployed contract on devnet (Program ID: 9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT)
+ * • Deployed contract on devnet (Program ID: HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5)
  * • Main wallet at ~/.config/solana/id.json
  * • Test player wallets: ./test-player1.json, ./test-player2.json
  * • Solana CLI configured for devnet
@@ -61,7 +61,7 @@ const { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = requ
 const fs = require('fs');
 
 // Configuration
-const PROGRAM_ID = new PublicKey("9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT");
+const PROGRAM_ID = new PublicKey("HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5");
 const DEVNET_URL = "https://api.devnet.solana.com";
 const WAGER_AMOUNT = 0.1 * LAMPORTS_PER_SOL; // 0.1 SOL per player
 
@@ -131,26 +131,19 @@ async function testBasicConnection() {
     
     // Test PDA derivation
     console.log("\n🔑 Testing PDA derivation...");
+    const gameId = Buffer.alloc(8);
+    gameId.writeBigUInt64LE(BigInt(Date.now()));
     const [wagerPda] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("wager"),
         wallets.player1Keypair.publicKey.toBuffer(),
         wallets.player2Keypair.publicKey.toBuffer(),
-      ],
-      PROGRAM_ID
-    );
-    
-    const [vaultPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("vault"),
-        wallets.player1Keypair.publicKey.toBuffer(),
-        wallets.player2Keypair.publicKey.toBuffer(),
+        gameId,
       ],
       PROGRAM_ID
     );
     
     console.log(`   ✅ Wager PDA: ${wagerPda.toString()}`);
-    console.log(`   ✅ Vault PDA: ${vaultPda.toString()}`);
     
     // Check if we have enough funds to test
     const balances = await displayBalances(connection, wallets);

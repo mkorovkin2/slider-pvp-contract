@@ -36,7 +36,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROGRAM_ID="9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT"
+PROGRAM_ID="HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5"
 NETWORK=${1:-devnet}
 
 if [ "$NETWORK" = "mainnet" ]; then
