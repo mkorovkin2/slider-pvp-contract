@@ -3,7 +3,15 @@
   "version": "1.0.0",
   "description": "Trustless wager/escrow smart contract for Solana",
   "scripts": {
-    "test": "anchor test"
+    "test": "anchor test",
+    "deploy:devnet": "./scripts/deploy.sh devnet",
+    "deploy:mainnet": "./scripts/deploy.sh mainnet",
+    "config:devnet": "solana config set --url https://api.devnet.solana.com",
+    "config:mainnet": "solana config set --url https://api.mainnet-beta.solana.com",
+    "status": "./scripts/contract-status.sh",
+    "build": "anchor build",
+    "test:devnet": "node devnet-testing/full-test.js",
+    "test:simple": "node devnet-testing/simple-test.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",

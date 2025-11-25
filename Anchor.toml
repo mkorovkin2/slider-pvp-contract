@@ -5,13 +5,10 @@ anchor_version = "0.31.1"
 seeds = false
 skip-lint = false
 
-[programs.localnet]
-slider_pvp = "HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5"
-
 [programs.devnet]
 slider_pvp = "HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5"
 
-[programs.mainnet]
+[programs.mainnet-beta]
 slider_pvp = "HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5"
 
 [registry]

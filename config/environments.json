@@ -1,0 +1,42 @@
+{
+  "devnet": {
+    "name": "Devnet",
+    "cluster": "devnet",
+    "rpcUrl": "https://api.devnet.solana.com",
+    "commitmentLevel": "confirmed",
+    "minSolBalance": 3.0,
+    "airdropEnabled": true,
+    "wallet": "~/.config/solana/id.json",
+    "programKeypair": "target/deploy/slider_pvp-keypair.json",
+    "verification": {
+      "runTests": true,
+      "testScript": "devnet-testing/simple-test.js"
+    },
+    "monitoring": {
+      "explorerUrl": "https://explorer.solana.com/address/{{PROGRAM_ID}}?cluster=devnet",
+      "alertsEnabled": false
+    }
+  },
+  "mainnet": {
+    "name": "Mainnet-Beta",
+    "cluster": "mainnet-beta",
+    "rpcUrl": "https://api.mainnet-beta.solana.com",
+    "commitmentLevel": "finalized",
+    "minSolBalance": 5.0,
+    "airdropEnabled": false,
+    "wallet": "~/.config/solana/mainnet-deploy.json",
+    "programKeypair": "target/deploy/slider_pvp-mainnet-keypair.json",
+    "verification": {
+      "runTests": false,
+      "requireConfirmation": true,
+      "safetyChecks": true
+    },
+    "monitoring": {
+      "explorerUrl": "https://explorer.solana.com/address/{{PROGRAM_ID}}",
+      "alertsEnabled": true,
+      "slackWebhook": "",
+      "discordWebhook": ""
+    }
+  }
+}
+
