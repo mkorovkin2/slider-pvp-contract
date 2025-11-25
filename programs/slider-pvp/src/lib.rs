@@ -84,15 +84,15 @@ pub mod slider_pvp {
         
         let wager = &mut ctx.accounts.wager;
         
-        wager.player1_deposited = true;
-        
-        // If both players have deposited, start the timer
-        if wager.player2_deposited {
-            wager.start_time = Clock::get()?.unix_timestamp;
-            msg!("Both players deposited! Timer started: {} seconds", TIMEOUT_SECONDS);
-        } else {
-            msg!("Player 1 deposited {} SOL", wager.wager_amount as f64 / 1_000_000_000.0);
-        }
+    wager.player1_deposited = true;
+    
+    // If both players have deposited, start the timer (only set once)
+    if wager.player2_deposited && wager.start_time == 0 {
+        wager.start_time = Clock::get()?.unix_timestamp;
+        msg!("Both players deposited! Timer started: {} seconds", TIMEOUT_SECONDS);
+    } else if !wager.player2_deposited {
+        msg!("Player 1 deposited {} SOL", wager.wager_amount as f64 / 1_000_000_000.0);
+    }
         
         Ok(())
     }
@@ -121,15 +121,15 @@ pub mod slider_pvp {
         
         let wager = &mut ctx.accounts.wager;
         
-        wager.player2_deposited = true;
-        
-        // If both players have deposited, start the timer
-        if wager.player1_deposited {
-            wager.start_time = Clock::get()?.unix_timestamp;
-            msg!("Both players deposited! Timer started: {} seconds", TIMEOUT_SECONDS);
-        } else {
-            msg!("Player 2 deposited {} SOL", wager.wager_amount as f64 / 1_000_000_000.0);
-        }
+    wager.player2_deposited = true;
+    
+    // If both players have deposited, start the timer (only set once)
+    if wager.player1_deposited && wager.start_time == 0 {
+        wager.start_time = Clock::get()?.unix_timestamp;
+        msg!("Both players deposited! Timer started: {} seconds", TIMEOUT_SECONDS);
+    } else if !wager.player1_deposited {
+        msg!("Player 2 deposited {} SOL", wager.wager_amount as f64 / 1_000_000_000.0);
+    }
         
         Ok(())
     }
@@ -160,11 +160,17 @@ pub mod slider_pvp {
         let winner_amount = total_pool.checked_mul(WINNER_PERCENTAGE).unwrap().checked_div(100).unwrap();
         let fee_amount = total_pool.checked_sub(winner_amount).unwrap();
         
-        let _winner_pubkey = if winner == 1 {
+        // Validate that the provided winner_account matches the declared winner
+        let winner_pubkey = if winner == 1 {
             wager.player1
         } else {
             wager.player2
         };
+        
+        require!(
+            ctx.accounts.winner_account.key() == winner_pubkey,
+            ErrorCode::WinnerAccountMismatch
+        );
         
         // Transfer from wager PDA using manual lamport manipulation
         // Transfer winner amount
@@ -194,11 +200,15 @@ pub mod slider_pvp {
         Ok(())
     }
 
-    /// Refund both players if timeout has expired
+    /// Refund both players if timeout has expired (arbiter only)
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         let wager = &ctx.accounts.wager;
         
         require!(!wager.is_settled, ErrorCode::WagerAlreadySettled);
+        require!(
+            ctx.accounts.arbiter.key() == wager.arbiter,
+            ErrorCode::UnauthorizedArbiter
+        );
         require!(
             wager.player1_deposited && wager.player2_deposited,
             ErrorCode::BothPlayersNotDeposited
@@ -238,11 +248,15 @@ pub mod slider_pvp {
         Ok(())
     }
 
-    /// Cancel wager and refund deposited player if other player hasn't deposited within timeout
+    /// Cancel wager and refund deposited player if other player hasn't deposited within timeout (arbiter only)
     pub fn cancel_wager(ctx: Context<CancelWager>) -> Result<()> {
         let wager = &ctx.accounts.wager;
         
         require!(!wager.is_settled, ErrorCode::WagerAlreadySettled);
+        require!(
+            ctx.accounts.arbiter.key() == wager.arbiter,
+            ErrorCode::UnauthorizedArbiter
+        );
         require!(
             !(wager.player1_deposited && wager.player2_deposited),
             ErrorCode::BothPlayersAlreadyDeposited
@@ -339,14 +353,20 @@ pub struct DeclareWinner<'info> {
     )]
     pub wager: Account<'info, Wager>,
     pub arbiter: Signer<'info>,
-    /// CHECK: This is the winner account (either player1 or player2)
+    /// CHECK: Validated in instruction logic to match winner parameter (player1 or player2)
     #[account(mut)]
     pub winner_account: AccountInfo<'info>,
-    /// CHECK: This is the fee recipient account
-    #[account(mut)]
+    /// CHECK: Must match the stored fee_recipient in wager state
+    #[account(
+        mut,
+        constraint = fee_recipient.key() == wager.fee_recipient @ ErrorCode::InvalidFeeRecipient
+    )]
     pub fee_recipient: AccountInfo<'info>,
-    /// CHECK: This is the payer who initialized the wager
-    #[account(mut)]
+    /// CHECK: Must match the stored payer in wager state
+    #[account(
+        mut,
+        constraint = payer_account.key() == wager.payer @ ErrorCode::InvalidPayerAccount
+    )]
     pub payer_account: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -359,14 +379,24 @@ pub struct Refund<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Player 1 account for refund
-    #[account(mut)]
+    pub arbiter: Signer<'info>,
+    /// CHECK: Must match the stored player1 in wager state
+    #[account(
+        mut,
+        constraint = player1.key() == wager.player1 @ ErrorCode::InvalidPlayer1Account
+    )]
     pub player1: AccountInfo<'info>,
-    /// CHECK: Player 2 account for refund
-    #[account(mut)]
+    /// CHECK: Must match the stored player2 in wager state
+    #[account(
+        mut,
+        constraint = player2.key() == wager.player2 @ ErrorCode::InvalidPlayer2Account
+    )]
     pub player2: AccountInfo<'info>,
-    /// CHECK: This is the payer who initialized the wager
-    #[account(mut)]
+    /// CHECK: Must match the stored payer in wager state
+    #[account(
+        mut,
+        constraint = payer_account.key() == wager.payer @ ErrorCode::InvalidPayerAccount
+    )]
     pub payer_account: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -379,14 +409,24 @@ pub struct CancelWager<'info> {
         bump = wager.bump
     )]
     pub wager: Account<'info, Wager>,
-    /// CHECK: Player 1 account for refund
-    #[account(mut)]
+    pub arbiter: Signer<'info>,
+    /// CHECK: Must match the stored player1 in wager state
+    #[account(
+        mut,
+        constraint = player1.key() == wager.player1 @ ErrorCode::InvalidPlayer1Account
+    )]
     pub player1: AccountInfo<'info>,
-    /// CHECK: Player 2 account for refund
-    #[account(mut)]
+    /// CHECK: Must match the stored player2 in wager state
+    #[account(
+        mut,
+        constraint = player2.key() == wager.player2 @ ErrorCode::InvalidPlayer2Account
+    )]
     pub player2: AccountInfo<'info>,
-    /// CHECK: This is the payer who initialized the wager
-    #[account(mut)]
+    /// CHECK: Must match the stored payer in wager state
+    #[account(
+        mut,
+        constraint = payer_account.key() == wager.payer @ ErrorCode::InvalidPayerAccount
+    )]
     pub payer_account: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -437,5 +477,15 @@ pub enum ErrorCode {
     BothPlayersAlreadyDeposited,
     #[msg("Deposit timeout has not expired yet, cannot cancel")]
     DepositTimeoutNotExpired,
+    #[msg("Winner account does not match declared winner")]
+    WinnerAccountMismatch,
+    #[msg("Invalid fee recipient account")]
+    InvalidFeeRecipient,
+    #[msg("Invalid payer account")]
+    InvalidPayerAccount,
+    #[msg("Invalid player1 account")]
+    InvalidPlayer1Account,
+    #[msg("Invalid player2 account")]
+    InvalidPlayer2Account,
 }
 
