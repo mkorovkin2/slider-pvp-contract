@@ -12,6 +12,17 @@ This Solana smart contract acts as a trustless wager or escrow system between tw
 - If only one player deposits, they can get their funds back after 30 seconds (deposit timeout)
 - If both players deposit but no winner is declared within 120 seconds, both can reclaim their deposits
 
+## 🚀 Mainnet Deployment
+
+**✅ LIVE ON SOLANA MAINNET** (November 26, 2025)
+
+**Mainnet Program ID:** `5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN`
+
+- 🌐 **Explorer:** https://explorer.solana.com/address/5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN
+- 📄 **Full Report:** [MAINNET_DEPLOYMENT_REPORT.md](MAINNET_DEPLOYMENT_REPORT.md)
+- 🔧 **Upgrade Authority:** Maintained by development team
+- ⚠️ **Status:** Production - Handle with care
+
 ## 🔒 Security Status
 
 **✅ ALL CRITICAL VULNERABILITIES FIXED** (November 27, 2025)
@@ -24,7 +35,7 @@ This contract has undergone comprehensive security remediation. All 9 CRITICAL a
 - ✅ Overflow attack prevention through wager limits
 - ✅ Conflict of interest prevention
 
-**Current Status:** Ready for devnet testing • Safe for mainnet after testing  
+**Current Status:** ✅ Live on Mainnet  
 **Documentation:** See [SECURITY_STATUS_CURRENT.md](SECURITY_STATUS_CURRENT.md) for full details
 
 ## Features
@@ -121,6 +132,9 @@ anchor test
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+
+// Mainnet Program ID
+const PROGRAM_ID = new PublicKey("5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN");
 
 // Initialize wager
 const wagerAmount = new anchor.BN(0.5 * LAMPORTS_PER_SOL); // 0.5 SOL per player
@@ -353,10 +367,37 @@ Remaining: 0.002 SOL (stays in vault as rent)
 
 ## Deployment
 
+### Mainnet (Production)
+
+The contract is deployed on Solana mainnet:
+
+**Program ID:** `5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN`
+
+**Connect to mainnet:**
+```typescript
+import { Connection, clusterApiUrl } from "@solana/web3.js";
+
+const connection = new Connection(clusterApiUrl("mainnet-beta"), "confirmed");
+const PROGRAM_ID = new PublicKey("5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN");
+```
+
+**Monitoring:**
+```bash
+# Check program status
+solana program show 5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN --url mainnet-beta
+
+# Monitor program logs
+solana logs 5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN --url mainnet-beta
+```
+
+### Development & Testing
+
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions for:
 - Local development
 - Devnet deployment
-- Mainnet deployment
+- Custom deployments
+
+**Full Deployment Report:** [MAINNET_DEPLOYMENT_REPORT.md](MAINNET_DEPLOYMENT_REPORT.md)
 
 ## Error Codes
 
