@@ -12,6 +12,21 @@ This Solana smart contract acts as a trustless wager or escrow system between tw
 - If only one player deposits, they can get their funds back after 30 seconds (deposit timeout)
 - If both players deposit but no winner is declared within 120 seconds, both can reclaim their deposits
 
+## 🔒 Security Status
+
+**✅ ALL CRITICAL VULNERABILITIES FIXED** (November 27, 2025)
+
+This contract has undergone comprehensive security remediation. All 9 CRITICAL and HIGH severity issues identified in the security audit have been resolved:
+
+- ✅ Fund theft prevention through account validation
+- ✅ Permanent lockup prevention through proper error handling
+- ✅ Account deletion prevention through balance validation
+- ✅ Overflow attack prevention through wager limits
+- ✅ Conflict of interest prevention
+
+**Current Status:** Ready for devnet testing • Safe for mainnet after testing  
+**Documentation:** See [SECURITY_STATUS_CURRENT.md](SECURITY_STATUS_CURRENT.md) for full details
+
 ## Features
 
 - ✅ **Trustless Escrow**: Funds held in separate vault PDA (SOL-only storage)

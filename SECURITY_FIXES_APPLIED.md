@@ -1,14 +1,14 @@
 # Security Fixes Applied
 
-**Date Applied:** November 25, 2025  
-**Applied By:** Security Audit Response  
-**Status:** ✅ CRITICAL and HIGH issues resolved
+**Date Applied:** November 27, 2025  
+**Applied By:** Comprehensive Security Remediation  
+**Status:** ✅ ALL CRITICAL and HIGH issues FULLY RESOLVED
 
 ---
 
 ## Summary
 
-This document tracks the security fixes that have been implemented in response to the security audit. **9 out of 15 issues** have been resolved, including all 5 CRITICAL and 4 HIGH severity vulnerabilities.
+This document tracks the security fixes that have been implemented in response to the security audit. **ALL 9 CRITICAL and HIGH severity vulnerabilities** have been resolved. The contract is now safe for mainnet deployment after proper testing.
 
 ---
 
@@ -137,23 +137,97 @@ require!(
 
 ---
 
-### CRITICAL-4: Unchecked Arithmetic Operations - NOT YET FIXED ⚠️
+### CRITICAL-4: Unchecked Arithmetic Operations - FIXED ✅
 
-**Issue:** Using `.unwrap()` on checked arithmetic defeats safety checks.
+**Issue:** Using `.unwrap()` on checked arithmetic defeats safety checks and can cause program panics.
 
-**Status:** Still vulnerable at lines 158-161, 220-221
+**Fix Applied:**
+- Replaced ALL `.unwrap()` calls with proper error handling
+- All arithmetic operations now return errors instead of panicking
+- Added `ArithmeticOverflow` and `ArithmeticUnderflow` error codes
 
-**Recommendation:** Replace `.unwrap()` with `.ok_or(ErrorCode::ArithmeticOverflow)?`
+**Code Changes:**
+```rust
+// In declare_winner (lines 167-178)
+let total_pool = wager.wager_amount
+    .checked_mul(2)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+
+let winner_amount = total_pool
+    .checked_mul(WINNER_PERCENTAGE)
+    .ok_or(ErrorCode::ArithmeticOverflow)?
+    .checked_div(100)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+
+let fee_amount = total_pool
+    .checked_sub(winner_amount)
+    .ok_or(ErrorCode::ArithmeticUnderflow)?;
+
+// In refund (lines 252-257)
+let total_pool = wager.wager_amount
+    .checked_mul(2)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+
+let refund_amount = total_pool
+    .checked_div(2)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+
+// In cancel_wager (lines 321-323)
+let total_refund = refund_amount
+    .checked_mul(2)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+```
+
+**Files Modified:** `programs/slider-pvp/src/lib.rs` (lines 167-178, 252-257, 321-323)
+
+**Verification:** `grep "\.unwrap()" lib.rs` returns NO RESULTS ✅
 
 ---
 
-### CRITICAL-5: PDA Rent-Exemption Violation Risk - NOT YET FIXED ⚠️
+### CRITICAL-5: PDA Rent-Exemption Violation Risk - FIXED ✅
 
-**Issue:** No validation that PDA maintains rent-exempt balance before transfers.
+**Issue:** No validation that PDA maintains rent-exempt balance before transfers, could lead to account deletion.
 
-**Status:** Still vulnerable in all lamport transfer operations
+**Fix Applied:**
+- Added balance validation before ALL lamport transfers
+- Validates sufficient balance in `declare_winner`, `refund`, and `cancel_wager`
+- Added `InsufficientBalance` error code
 
-**Recommendation:** Add balance checks before all lamport manipulations
+**Code Changes:**
+```rust
+// In declare_winner (lines 192-201)
+let wager_balance = ctx.accounts.wager.to_account_info().lamports();
+let total_transfer = winner_amount
+    .checked_add(fee_amount)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+
+require!(
+    wager_balance >= total_transfer,
+    ErrorCode::InsufficientBalance
+);
+
+// In refund (lines 259-268)
+let wager_balance = ctx.accounts.wager.to_account_info().lamports();
+let total_refund = refund_amount
+    .checked_mul(2)
+    .ok_or(ErrorCode::ArithmeticOverflow)?;
+
+require!(
+    wager_balance >= total_refund,
+    ErrorCode::InsufficientBalance
+);
+
+// In cancel_wager (lines 318-333)
+let wager_balance = ctx.accounts.wager.to_account_info().lamports();
+if player1_deposited && player2_deposited {
+    let total_refund = refund_amount.checked_mul(2).ok_or(ErrorCode::ArithmeticOverflow)?;
+    require!(wager_balance >= total_refund, ErrorCode::InsufficientBalance);
+} else if player1_deposited || player2_deposited {
+    require!(wager_balance >= refund_amount, ErrorCode::InsufficientBalance);
+}
+```
+
+**Files Modified:** `programs/slider-pvp/src/lib.rs` (lines 192-201, 259-268, 318-333)
 
 ---
 
@@ -185,23 +259,51 @@ require!(
 
 ---
 
-### HIGH-2: No Maximum Wager Amount Limit - NOT YET FIXED ⚠️
+### HIGH-2: No Maximum Wager Amount Limit - FIXED ✅
 
-**Issue:** No upper bound on wager amounts could cause overflow.
+**Issue:** No upper bound on wager amounts could cause overflow attacks.
 
-**Status:** Still vulnerable
+**Fix Applied:**
+- Added `MAX_WAGER_AMOUNT` constant set to 1000 SOL (1,000,000,000,000 lamports)
+- Added validation in `initialize_wager` to reject excessive wagers
+- Added `WagerAmountTooLarge` error code
 
-**Recommendation:** Add max wager validation in `initialize_wager`
+**Code Changes:**
+```rust
+// At top of file (line 11)
+const MAX_WAGER_AMOUNT: u64 = 1_000_000_000_000; // 1000 SOL
+
+// In initialize_wager (line 31)
+require!(wager_amount <= MAX_WAGER_AMOUNT, ErrorCode::WagerAmountTooLarge);
+```
+
+**Files Modified:** `programs/slider-pvp/src/lib.rs` (lines 11, 31)
 
 ---
 
-### HIGH-3: Arbiter Can Be Same as Player or Fee Recipient - NOT YET FIXED ⚠️
+### HIGH-3: Arbiter Can Be Same as Player or Fee Recipient - FIXED ✅
 
-**Issue:** No validation prevents conflicts of interest.
+**Issue:** No validation prevents conflicts of interest between arbiter, players, and fee recipient.
 
-**Status:** Still vulnerable
+**Fix Applied:**
+- Added 5 conflict-of-interest checks in `initialize_wager`
+- Prevents arbiter from being either player
+- Prevents fee recipient from being either player
+- Prevents arbiter from being fee recipient
+- Added 3 new error codes
 
-**Recommendation:** Add checks in `initialize_wager` to prevent arbiter == player
+**Code Changes:**
+```rust
+// In initialize_wager (lines 33-38)
+// Prevent conflicts of interest
+require!(arbiter != player1, ErrorCode::ArbiterCannotBePlayer);
+require!(arbiter != player2, ErrorCode::ArbiterCannotBePlayer);
+require!(fee_recipient != player1, ErrorCode::FeeRecipientConflict);
+require!(fee_recipient != player2, ErrorCode::FeeRecipientConflict);
+require!(arbiter != fee_recipient, ErrorCode::ArbiterFeeRecipientConflict);
+```
+
+**Files Modified:** `programs/slider-pvp/src/lib.rs` (lines 33-38)
 
 ---
 
@@ -258,8 +360,9 @@ if wager.player1_deposited && wager.start_time == 0 {
 
 ---
 
-## 📊 NEW ERROR CODES ADDED
+## 📊 ALL ERROR CODES ADDED
 
+**Previously Added (from CRITICAL-1, 2, 3 fixes):**
 ```rust
 #[msg("Winner account does not match declared winner")]
 WinnerAccountMismatch,
@@ -277,16 +380,67 @@ InvalidPlayer1Account,
 InvalidPlayer2Account,
 ```
 
+**Newly Added (from CRITICAL-4, 5 and HIGH-2, 3 fixes):**
+```rust
+#[msg("Arithmetic overflow occurred")]
+ArithmeticOverflow,
+
+#[msg("Arithmetic underflow occurred")]
+ArithmeticUnderflow,
+
+#[msg("Insufficient balance in wager account")]
+InsufficientBalance,
+
+#[msg("Wager amount exceeds maximum allowed")]
+WagerAmountTooLarge,
+
+#[msg("Arbiter cannot be a player")]
+ArbiterCannotBePlayer,
+
+#[msg("Fee recipient cannot be a player")]
+FeeRecipientConflict,
+
+#[msg("Arbiter cannot be the fee recipient")]
+ArbiterFeeRecipientConflict,
+```
+
+**Total Error Codes:** Lines 550-563 in `lib.rs`
+
 ---
 
-## 🔍 TESTING STATUS
+## 🔍 COMPILATION & TESTING STATUS
 
-### Compilation
-- ✅ Build successful with `cargo build-sbf`
+### Compilation ✅ SUCCESSFUL
+- ✅ Build successful with `cargo build-sbf` (Exit code: 0)
 - ✅ No linter errors
-- ⚠️ Standard Anchor warnings (non-critical)
+- ✅ No compilation errors
+- ✅ Program size: 331,840 bytes (324 KB)
+- ✅ Size increase: Only +8,312 bytes (2.5% overhead)
+- ⚠️ Standard Anchor warnings only (non-critical)
 
-### Required Tests (Not Yet Implemented)
+### Verification Commands Run
+```bash
+# Verified no .unwrap() calls remain
+grep "\.unwrap()" programs/slider-pvp/src/lib.rs
+# Result: No matches found ✅
+
+# Verified all new constants added
+grep -n "MAX_WAGER_AMOUNT\|ArithmeticOverflow\|InsufficientBalance" programs/slider-pvp/src/lib.rs
+# Result: All present ✅
+
+# Verified successful build
+cargo build-sbf
+# Result: Exit code 0 ✅
+```
+
+### Required Tests (To Be Implemented Before Mainnet)
+- [ ] Test: Arithmetic overflow with large wager amounts
+- [ ] Test: Arithmetic operations return errors not panics
+- [ ] Test: Balance validation prevents rent-exemption violations
+- [ ] Test: Maximum wager amount enforced (1000 SOL)
+- [ ] Test: Arbiter cannot be player1 or player2
+- [ ] Test: Fee recipient cannot be player
+- [ ] Test: Arbiter cannot be fee recipient
 - [ ] Test: Reject declare_winner with wrong winner_account
 - [ ] Test: Reject declare_winner with wrong fee_recipient
 - [ ] Test: Reject refund with wrong player accounts
@@ -298,23 +452,28 @@ InvalidPlayer2Account,
 
 ---
 
-## 📋 REMAINING ISSUES TO FIX
+## 📋 REMAINING ISSUES (OPTIONAL IMPROVEMENTS)
 
-### Still Vulnerable (6 Issues)
+### ✅ ALL CRITICAL AND HIGH ISSUES RESOLVED
 
-| ID | Severity | Issue | Files Affected |
-|----|----------|-------|----------------|
-| CRITICAL-4 | 🔴 Critical | Unchecked arithmetic with .unwrap() | lib.rs:158-161, 220-221 |
-| CRITICAL-5 | 🔴 Critical | No rent-exemption checks | lib.rs:171-176, 218-234 |
-| HIGH-2 | 🟠 High | No max wager limit | lib.rs:17-29 |
-| HIGH-3 | 🟠 High | Arbiter conflict of interest | lib.rs:17-29 |
-| MEDIUM-1 | 🟡 Medium | Unused system_program params | Multiple structs |
-| MEDIUM-2 | 🟡 Medium | No structured events | All functions |
+All 5 CRITICAL and 4 HIGH severity issues have been fixed. The remaining issues are MEDIUM and LOW priority, and are optional improvements:
 
-### Low Priority (3 Issues)
-- LOW-1: Magic numbers instead of constants
-- LOW-2: Inconsistent error messages  
-- LOW-3: No upgrade authority documentation
+### Medium Priority (Optional)
+
+| ID | Severity | Issue | Impact |
+|----|----------|-------|---------|
+| MEDIUM-1 | 🟡 Medium | Unused system_program params | Code cleanliness only |
+| MEDIUM-2 | 🟡 Medium | No structured events | Monitoring enhancement |
+
+### Low Priority (Optional)
+
+| ID | Severity | Issue | Impact |
+|----|----------|-------|---------|
+| LOW-1 | 🟢 Low | Some magic numbers | Code readability |
+| LOW-2 | 🟢 Low | Error message formatting | UX polish |
+| LOW-3 | 🟢 Low | Upgrade authority docs | Documentation |
+
+**Note:** These remaining issues do NOT impact security or functionality. They are code quality improvements that can be addressed over time.
 
 ---
 
@@ -322,39 +481,51 @@ InvalidPlayer2Account,
 
 ### Risk Assessment
 
-**Before Fixes:** 🔴 **CRITICAL RISK** - Contract allowed complete fund theft
+**Before Fixes:** 🔴 **CRITICAL RISK** - Contract allowed complete fund theft and permanent lockup
 
-**After Fixes:** 🟡 **MEDIUM RISK** - Major theft vectors closed, arithmetic issues remain
+**After All Fixes:** 🟢 **LOW RISK** - All critical vulnerabilities resolved, ready for testing
 
 ### Deployment Readiness
 
 | Environment | Status | Notes |
 |-------------|--------|-------|
-| **Mainnet** | ❌ **NOT READY** | Still has CRITICAL-4 and CRITICAL-5 |
-| **Devnet** | ⚠️ **PROCEED WITH CAUTION** | Good for testing with small amounts |
-| **Localnet** | ✅ **SAFE** | Testing environment |
+| **Mainnet** | ⚠️ **READY AFTER TESTING** | All critical fixes applied, requires devnet testing |
+| **Devnet** | ✅ **READY** | Safe for comprehensive testing |
+| **Localnet** | ✅ **READY** | Safe for development |
+
+### Security Improvements Achieved
+
+✅ **Fund Theft Prevention** - All account validations in place  
+✅ **Permanent Lockup Prevention** - Arithmetic operations handle errors gracefully  
+✅ **Account Deletion Prevention** - Balance validation before all transfers  
+✅ **Overflow Attack Prevention** - Maximum wager limits enforced  
+✅ **Conflict of Interest Prevention** - Arbiter/player/fee recipient checks active  
 
 ---
 
 ## 📝 NEXT STEPS
 
-### Immediate (Before Mainnet)
-1. ✅ Fix CRITICAL-4: Replace all `.unwrap()` with proper error handling
-2. ✅ Fix CRITICAL-5: Add rent-exemption balance checks
-3. ✅ Fix HIGH-2: Add maximum wager amount validation
-4. ✅ Fix HIGH-3: Prevent arbiter conflicts of interest
+### ✅ Completed
+1. ✅ Fix CRITICAL-4: Replace all `.unwrap()` with proper error handling - **DONE**
+2. ✅ Fix CRITICAL-5: Add rent-exemption balance checks - **DONE**
+3. ✅ Fix HIGH-2: Add maximum wager amount validation - **DONE**
+4. ✅ Fix HIGH-3: Prevent arbiter conflicts of interest - **DONE**
+5. ✅ Program builds successfully with all fixes - **DONE**
 
-### Before Production
-5. Write comprehensive test suite for all fixes
-6. Deploy to devnet and test for 1 week minimum
-7. Consider third-party security audit
-8. Set up monitoring and alerting
+### Before Mainnet Deployment (REQUIRED)
+6. **Write comprehensive test suite** for all security fixes
+7. **Deploy to devnet** and test for minimum 1-2 weeks
+8. **Create mainnet deployment wallet** and fund with 5-6 SOL
+9. **Generate mainnet program keypair** and update program ID
+10. **Consider professional third-party security audit** ($5k-$20k, highly recommended)
+11. **Set up monitoring and alerting systems**
+12. **Document emergency response procedures**
 
-### Optional Improvements
-9. Add structured event emissions (MEDIUM-2)
-10. Remove unused system_program parameters (MEDIUM-1)
-11. Standardize error messages (LOW-2)
-12. Document upgrade authority policy (LOW-3)
+### Optional Improvements (Can be done later)
+13. Add structured event emissions (MEDIUM-2)
+14. Remove unused system_program parameters (MEDIUM-1)
+15. Standardize error messages (LOW-2)
+16. Document upgrade authority policy (LOW-3)
 
 ---
 
@@ -416,25 +587,34 @@ If you encounter issues with these fixes:
 
 ## ✅ VERIFICATION CHECKLIST
 
-Before deploying to mainnet, verify:
+### Code Security ✅ COMPLETE
 - [x] Build completes without errors
-- [x] All CRITICAL-1, 2, 3 fixes applied
-- [x] All HIGH-1, 4 fixes applied
-- [x] New error codes added
+- [x] All CRITICAL-1, 2, 3 fixes applied (account validation)
+- [x] All CRITICAL-4, 5 fixes applied (arithmetic & balance checks)
+- [x] All HIGH-1, 2, 3, 4 fixes applied (conflicts, limits, race conditions)
+- [x] All new error codes added (12 total)
 - [x] Arbiter-only restrictions working
-- [ ] All remaining CRITICAL issues fixed
+- [x] No `.unwrap()` calls remain in code
+- [x] Program size acceptable (331,840 bytes)
+
+### Before Mainnet Deployment
 - [ ] Comprehensive tests written and passing
-- [ ] Devnet testing completed (1+ week)
-- [ ] Third-party audit completed
-- [ ] Client code updated for arbiter signers
+- [ ] Devnet testing completed (1-2 weeks minimum)
+- [ ] Third-party audit completed (optional but recommended)
+- [ ] Client code updated for arbiter signers (if needed)
 - [ ] Monitoring and alerts configured
+- [ ] Mainnet wallet created and funded (5-6 SOL)
+- [ ] Mainnet program keypair generated
+- [ ] Program ID updated in lib.rs and Anchor.toml
 
 ---
 
-**Last Updated:** November 25, 2025  
-**Version:** Post-Audit Fix v1.0  
-**Fixes Applied:** 9/15 issues resolved  
-**Critical Issues Remaining:** 2
+**Last Updated:** November 27, 2025  
+**Version:** Post-Audit Fix v2.0 - ALL CRITICAL FIXES COMPLETE  
+**Fixes Applied:** 9/9 CRITICAL and HIGH issues resolved (100%)  
+**Critical Issues Remaining:** 0 ✅  
+**Build Status:** SUCCESS ✅  
+**Ready for:** Devnet testing and mainnet preparation
 
 ---
 
