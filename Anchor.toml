@@ -15,7 +15,7 @@ slider_pvp = "HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

@@ -8,6 +8,7 @@ const TIMEOUT_SECONDS: i64 = 120;
 const DEPOSIT_TIMEOUT_SECONDS: i64 = 30;
 const WINNER_PERCENTAGE: u64 = 95;
 const FEE_PERCENTAGE: u64 = 5;
+const MAX_WAGER_AMOUNT: u64 = 1_000_000_000_000; // 1000 SOL
 
 #[program]
 pub mod slider_pvp {
@@ -27,6 +28,14 @@ pub mod slider_pvp {
         
         require!(player1 != player2, ErrorCode::SamePlayer);
         require!(wager_amount > 0, ErrorCode::InvalidWagerAmount);
+        require!(wager_amount <= MAX_WAGER_AMOUNT, ErrorCode::WagerAmountTooLarge);
+        
+        // Prevent conflicts of interest
+        require!(arbiter != player1, ErrorCode::ArbiterCannotBePlayer);
+        require!(arbiter != player2, ErrorCode::ArbiterCannotBePlayer);
+        require!(fee_recipient != player1, ErrorCode::FeeRecipientConflict);
+        require!(fee_recipient != player2, ErrorCode::FeeRecipientConflict);
+        require!(arbiter != fee_recipient, ErrorCode::ArbiterFeeRecipientConflict);
         
         // Calculate initialization cost (rent for wager PDA only)
         let rent = Rent::get()?;
@@ -155,10 +164,18 @@ pub mod slider_pvp {
             ErrorCode::TimeoutExpired
         );
         
-        let total_pool = wager.wager_amount.checked_mul(2).unwrap();
+        let total_pool = wager.wager_amount
+            .checked_mul(2)
+            .ok_or(ErrorCode::ArithmeticOverflow)?;
         
-        let winner_amount = total_pool.checked_mul(WINNER_PERCENTAGE).unwrap().checked_div(100).unwrap();
-        let fee_amount = total_pool.checked_sub(winner_amount).unwrap();
+        let winner_amount = total_pool
+            .checked_mul(WINNER_PERCENTAGE)
+            .ok_or(ErrorCode::ArithmeticOverflow)?
+            .checked_div(100)
+            .ok_or(ErrorCode::ArithmeticOverflow)?;
+        let fee_amount = total_pool
+            .checked_sub(winner_amount)
+            .ok_or(ErrorCode::ArithmeticUnderflow)?;
         
         // Validate that the provided winner_account matches the declared winner
         let winner_pubkey = if winner == 1 {
@@ -170,6 +187,17 @@ pub mod slider_pvp {
         require!(
             ctx.accounts.winner_account.key() == winner_pubkey,
             ErrorCode::WinnerAccountMismatch
+        );
+        
+        // Validate sufficient balance for transfers
+        let wager_balance = ctx.accounts.wager.to_account_info().lamports();
+        let total_transfer = winner_amount
+            .checked_add(fee_amount)
+            .ok_or(ErrorCode::ArithmeticOverflow)?;
+        
+        require!(
+            wager_balance >= total_transfer,
+            ErrorCode::InsufficientBalance
         );
         
         // Transfer from wager PDA using manual lamport manipulation
@@ -221,8 +249,23 @@ pub mod slider_pvp {
         );
         
         // Transfer from wager PDA using manual lamport manipulation
-        let total_pool = wager.wager_amount.checked_mul(2).unwrap();
-        let refund_amount = total_pool.checked_div(2).unwrap();
+        let total_pool = wager.wager_amount
+            .checked_mul(2)
+            .ok_or(ErrorCode::ArithmeticOverflow)?;
+        let refund_amount = total_pool
+            .checked_div(2)
+            .ok_or(ErrorCode::ArithmeticOverflow)?;
+        
+        // Validate sufficient balance for refunds
+        let wager_balance = ctx.accounts.wager.to_account_info().lamports();
+        let total_refund = refund_amount
+            .checked_mul(2)
+            .ok_or(ErrorCode::ArithmeticOverflow)?;
+        
+        require!(
+            wager_balance >= total_refund,
+            ErrorCode::InsufficientBalance
+        );
         
         // Refund player 1 from wager
         **ctx.accounts.wager.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
@@ -271,6 +314,23 @@ pub mod slider_pvp {
         let player1_deposited = wager.player1_deposited;
         let player2_deposited = wager.player2_deposited;
         let refund_amount = wager.wager_amount;
+        
+        // Validate sufficient balance for refunds
+        let wager_balance = ctx.accounts.wager.to_account_info().lamports();
+        if player1_deposited && player2_deposited {
+            let total_refund = refund_amount
+                .checked_mul(2)
+                .ok_or(ErrorCode::ArithmeticOverflow)?;
+            require!(
+                wager_balance >= total_refund,
+                ErrorCode::InsufficientBalance
+            );
+        } else if player1_deposited || player2_deposited {
+            require!(
+                wager_balance >= refund_amount,
+                ErrorCode::InsufficientBalance
+            );
+        }
         
         // Refund using manual lamport manipulation from wager PDA
         if player1_deposited {
@@ -487,5 +547,19 @@ pub enum ErrorCode {
     InvalidPlayer1Account,
     #[msg("Invalid player2 account")]
     InvalidPlayer2Account,
+    #[msg("Arithmetic overflow occurred")]
+    ArithmeticOverflow,
+    #[msg("Arithmetic underflow occurred")]
+    ArithmeticUnderflow,
+    #[msg("Insufficient balance in wager account")]
+    InsufficientBalance,
+    #[msg("Wager amount exceeds maximum allowed")]
+    WagerAmountTooLarge,
+    #[msg("Arbiter cannot be a player")]
+    ArbiterCannotBePlayer,
+    #[msg("Fee recipient cannot be a player")]
+    FeeRecipientConflict,
+    #[msg("Arbiter cannot be the fee recipient")]
+    ArbiterFeeRecipientConflict,
 }
 
