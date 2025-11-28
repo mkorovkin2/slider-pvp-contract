@@ -5,8 +5,8 @@ use anchor_lang::solana_program::sysvar::rent::Rent;
 declare_id!("5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN");
 
 const TIMEOUT_SECONDS: i64 = 120;
-const WINNER_PERCENTAGE: u64 = 95;
-const FEE_PERCENTAGE: u64 = 5;
+const WINNER_PERCENTAGE: u64 = 975;  // 97.5%
+const FEE_PERCENTAGE: u64 = 25;      // 2.5%
 const MAX_WAGER_AMOUNT: u64 = 1_000_000_000_000; // 1000 SOL
 
 #[program]
@@ -170,7 +170,7 @@ pub mod slider_pvp {
         let winner_amount = total_pool
             .checked_mul(WINNER_PERCENTAGE)
             .ok_or(ErrorCode::ArithmeticOverflow)?
-            .checked_div(100)
+            .checked_div(1000)
             .ok_or(ErrorCode::ArithmeticOverflow)?;
         let fee_amount = total_pool
             .checked_sub(winner_amount)
