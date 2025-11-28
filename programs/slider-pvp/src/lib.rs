@@ -5,7 +5,6 @@ use anchor_lang::solana_program::sysvar::rent::Rent;
 declare_id!("5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN");
 
 const TIMEOUT_SECONDS: i64 = 120;
-const DEPOSIT_TIMEOUT_SECONDS: i64 = 30;
 const WINNER_PERCENTAGE: u64 = 95;
 const FEE_PERCENTAGE: u64 = 5;
 const MAX_WAGER_AMOUNT: u64 = 1_000_000_000_000; // 1000 SOL
@@ -291,7 +290,7 @@ pub mod slider_pvp {
         Ok(())
     }
 
-    /// Cancel wager and refund deposited player if other player hasn't deposited within timeout (arbiter only)
+    /// Cancel wager and refund deposited players (arbiter only, can be called at any time)
     pub fn cancel_wager(ctx: Context<CancelWager>) -> Result<()> {
         let wager = &ctx.accounts.wager;
         
@@ -303,12 +302,6 @@ pub mod slider_pvp {
         require!(
             !(wager.player1_deposited && wager.player2_deposited),
             ErrorCode::BothPlayersAlreadyDeposited
-        );
-        
-        let current_time = Clock::get()?.unix_timestamp;
-        require!(
-            current_time - wager.creation_time > DEPOSIT_TIMEOUT_SECONDS,
-            ErrorCode::DepositTimeoutNotExpired
         );
         
         let player1_deposited = wager.player1_deposited;
@@ -349,7 +342,7 @@ pub mod slider_pvp {
         
         wager.is_settled = true;
         
-        msg!("Wager cancelled due to incomplete deposits after {} seconds", DEPOSIT_TIMEOUT_SECONDS);
+        msg!("Wager cancelled by arbiter due to incomplete deposits");
         
         // Close wager PDA and send remaining rent to payer
         let remaining_lamports = ctx.accounts.wager.to_account_info().lamports();
@@ -535,8 +528,6 @@ pub enum ErrorCode {
     TimeoutNotExpired,
     #[msg("Both players have already deposited, cannot cancel")]
     BothPlayersAlreadyDeposited,
-    #[msg("Deposit timeout has not expired yet, cannot cancel")]
-    DepositTimeoutNotExpired,
     #[msg("Winner account does not match declared winner")]
     WinnerAccountMismatch,
     #[msg("Invalid fee recipient account")]
