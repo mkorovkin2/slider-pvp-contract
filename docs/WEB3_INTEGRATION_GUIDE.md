@@ -5,28 +5,16 @@ This guide shows how to integrate the Slider PvP smart contract into your web3 a
 
 ## Architecture Overview
 
-The contract uses a **dual-PDA architecture**:
+The contract uses a **Unified PDA architecture**:
 
-1. **Wager PDA** (`seeds: ["wager", player1, player2]`)
+1. **Wager PDA** (`seeds: ["wager", player1, player2, game_id]`)
    - Stores game state (player addresses, arbiter, amounts, timestamps, etc.)
-   - Size: 175 bytes (167 byte struct + 8 byte discriminator)
-   - Rent: ~0.00116 SOL
+   - Holds the deposited SOL
+   - Rent: ~0.002 SOL (Paid by initializer, refunded to initializer on settlement)
 
-2. **Vault PDA** (`seeds: ["vault", player1, player2]`)
-   - Stores deposited SOL only (no data)
-   - Size: 0 bytes (SOL-only account)
-   - Rent: ~0.00089 SOL
-
-**Initialization Cost:** ~0.00205 SOL total, automatically deducted from player pool before payouts.
-
-**Example with 0.5 SOL per player:**
-```
-Total Pool: 1.0 SOL
-- Initialization Cost: 0.002 SOL
-= Distributable: 0.998 SOL
-  → Winner (95%): 0.9481 SOL
-  → Fee (5%): 0.0499 SOL
-```
+**Payout Structure:**
+- **Winner**: 95% of the wager pool
+- **Fee Recipient**: 5% of the wager pool
 
 ## Prerequisites
 
@@ -38,9 +26,7 @@ npm install @solana/wallet-adapter-react @solana/wallet-adapter-react-ui @solana
 ```
 
 ### 2. Get Your Program ID
-Your program ID is: `Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS`
-
-After deployment, you'll need to update this in your code.
+Your program ID is: `5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN`
 
 ### 3. Generate IDL
 After building your program, the IDL will be at `target/idl/slider_pvp.json`. Copy this to your frontend project.
@@ -58,7 +44,7 @@ import { SliderPvp } from './idl/slider_pvp';
 import idl from './idl/slider_pvp.json';
 
 // Initialize the program
-const programId = new web3.PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
+const programId = new web3.PublicKey('5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN');
 
 // Setup provider (with wallet)
 const provider = new AnchorProvider(
@@ -69,17 +55,18 @@ const provider = new AnchorProvider(
 
 const program = new Program<SliderPvp>(idl as any, programId, provider);
 
-// Helper function to derive both PDAs
-function derivePDAs(player1: web3.PublicKey, player2: web3.PublicKey, programId: web3.PublicKey) {
+// Helper function to derive PDA
+function deriveWagerPDA(player1: web3.PublicKey, player2: web3.PublicKey, gameId: BN, programId: web3.PublicKey) {
   const [wagerPda] = web3.PublicKey.findProgramAddressSync(
-    [Buffer.from('wager'), player1.toBuffer(), player2.toBuffer()],
+    [
+        Buffer.from('wager'), 
+        player1.toBuffer(), 
+        player2.toBuffer(),
+        gameId.toArrayLike(Buffer, 'le', 8)
+    ],
     programId
   );
-  const [vaultPda] = web3.PublicKey.findProgramAddressSync(
-    [Buffer.from('vault'), player1.toBuffer(), player2.toBuffer()],
-    programId
-  );
-  return { wagerPda, vaultPda };
+  return wagerPda;
 }
 
 // 1. Initialize a Wager
@@ -88,27 +75,11 @@ async function initializeWager(
   player2: web3.PublicKey,
   arbiter: web3.PublicKey,
   feeRecipient: web3.PublicKey,
-  wagerAmountSol: number
+  wagerAmountSol: number,
+  gameId: number
 ) {
-  // Derive the wager PDA (stores game state)
-  const [wagerPda] = web3.PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('wager'),
-      player1.toBuffer(),
-      player2.toBuffer()
-    ],
-    programId
-  );
-
-  // Derive the vault PDA (stores deposited SOL)
-  const [vaultPda] = web3.PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('vault'),
-      player1.toBuffer(),
-      player2.toBuffer()
-    ],
-    programId
-  );
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
 
   // Convert SOL to lamports
   const wagerAmount = new BN(wagerAmountSol * web3.LAMPORTS_PER_SOL);
@@ -119,31 +90,32 @@ async function initializeWager(
       player2,
       arbiter,
       feeRecipient,
-      wagerAmount
+      wagerAmount,
+      gameIdBn
     )
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
       payer: provider.wallet.publicKey,
       systemProgram: web3.SystemProgram.programId,
     })
     .rpc();
 
-  return { transaction: tx, wagerPda, vaultPda };
+  return { transaction: tx, wagerPda };
 }
 
 // 2. Player 1 Deposits
 async function depositPlayer1(
   player1: web3.PublicKey,
-  player2: web3.PublicKey
+  player2: web3.PublicKey,
+  gameId: number
 ) {
-  const { wagerPda, vaultPda } = derivePDAs(player1, player2, programId);
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
 
   const tx = await program.methods
     .depositPlayer1()
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
       player1: provider.wallet.publicKey,
       systemProgram: web3.SystemProgram.programId,
     })
@@ -155,15 +127,16 @@ async function depositPlayer1(
 // 3. Player 2 Deposits
 async function depositPlayer2(
   player1: web3.PublicKey,
-  player2: web3.PublicKey
+  player2: web3.PublicKey,
+  gameId: number
 ) {
-  const { wagerPda, vaultPda } = derivePDAs(player1, player2, programId);
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
 
   const tx = await program.methods
     .depositPlayer2()
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
       player2: provider.wallet.publicKey,
       systemProgram: web3.SystemProgram.programId,
     })
@@ -176,11 +149,13 @@ async function depositPlayer2(
 async function declareWinner(
   player1: web3.PublicKey,
   player2: web3.PublicKey,
+  gameId: number,
   winner: 1 | 2 // 1 for player1, 2 for player2
 ) {
-  const { wagerPda, vaultPda } = derivePDAs(player1, player2, programId);
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
 
-  // Fetch wager account to get winner and fee recipient
+  // Fetch wager account to get winner, fee recipient, and payer
   const wagerAccount = await program.account.wager.fetch(wagerPda);
   
   const winnerAccount = winner === 1 ? wagerAccount.player1 : wagerAccount.player2;
@@ -189,10 +164,10 @@ async function declareWinner(
     .declareWinner(winner)
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
       arbiter: provider.wallet.publicKey,
       winnerAccount: winnerAccount,
       feeRecipient: wagerAccount.feeRecipient,
+      payerAccount: wagerAccount.payer, // Rent refund goes here
       systemProgram: web3.SystemProgram.programId,
     })
     .rpc();
@@ -203,17 +178,25 @@ async function declareWinner(
 // 5. Refund (after timeout)
 async function refundWager(
   player1: web3.PublicKey,
-  player2: web3.PublicKey
+  player2: web3.PublicKey,
+  gameId: number
 ) {
-  const { wagerPda, vaultPda } = derivePDAs(player1, player2, programId);
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
+
+  const wagerAccount = await program.account.wager.fetch(wagerPda);
 
   const tx = await program.methods
     .refund()
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
+      arbiter: provider.wallet.publicKey, // Must be arbiter to trigger refund? No, anyone according to docs, but code says arbiter check.
+                                          // Wait, checking code...
+                                          // Code: require!(ctx.accounts.arbiter.key() == wager.arbiter, ErrorCode::UnauthorizedArbiter);
+                                          // YES, only Arbiter can call refund() in current code.
       player1: player1,
       player2: player2,
+      payerAccount: wagerAccount.payer,
       systemProgram: web3.SystemProgram.programId,
     })
     .rpc();
@@ -224,17 +207,22 @@ async function refundWager(
 // 6. Cancel Wager (deposit timeout)
 async function cancelWager(
   player1: web3.PublicKey,
-  player2: web3.PublicKey
+  player2: web3.PublicKey,
+  gameId: number
 ) {
-  const { wagerPda, vaultPda } = derivePDAs(player1, player2, programId);
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
+  
+  const wagerAccount = await program.account.wager.fetch(wagerPda);
 
   const tx = await program.methods
     .cancelWager()
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
+      arbiter: provider.wallet.publicKey, // Only arbiter
       player1: player1,
       player2: player2,
+      payerAccount: wagerAccount.payer,
       systemProgram: web3.SystemProgram.programId,
     })
     .rpc();
@@ -245,9 +233,11 @@ async function cancelWager(
 // Fetch Wager Data
 async function getWagerData(
   player1: web3.PublicKey,
-  player2: web3.PublicKey
+  player2: web3.PublicKey,
+  gameId: number
 ) {
-  const { wagerPda } = derivePDAs(player1, player2, programId);
+  const gameIdBn = new BN(gameId);
+  const wagerPda = deriveWagerPDA(player1, player2, gameIdBn, programId);
 
   const wagerAccount = await program.account.wager.fetch(wagerPda);
   
@@ -263,8 +253,6 @@ async function getWagerData(
     startTime: wagerAccount.startTime.toNumber(),
     winner: wagerAccount.winner,
     isSettled: wagerAccount.isSettled,
-    initializationCost: wagerAccount.initializationCost.toNumber() / web3.LAMPORTS_PER_SOL,
-    netPayout: (wagerAccount.wagerAmount.toNumber() * 2 - wagerAccount.initializationCost.toNumber()) / web3.LAMPORTS_PER_SOL,
   };
 }
 ```
@@ -290,7 +278,7 @@ function WagerComponent() {
       { commitment: 'confirmed' }
     );
     
-    const programId = new web3.PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
+    const programId = new web3.PublicKey('5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN');
     return new Program<SliderPvp>(idl as any, programId, provider);
   };
 
@@ -303,21 +291,14 @@ function WagerComponent() {
     const player2 = new web3.PublicKey('PLAYER2_ADDRESS_HERE');
     const arbiter = new web3.PublicKey('ARBITER_ADDRESS_HERE');
     const feeRecipient = new web3.PublicKey('FEE_RECIPIENT_HERE');
+    const gameId = new BN(Date.now()); // Example game ID
     
     const [wagerPda] = web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from('wager'),
         player1.toBuffer(),
-        player2.toBuffer()
-      ],
-      program.programId
-    );
-
-    const [vaultPda] = web3.PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('vault'),
-        player1.toBuffer(),
-        player2.toBuffer()
+        player2.toBuffer(),
+        gameId.toArrayLike(Buffer, 'le', 8)
       ],
       program.programId
     );
@@ -326,10 +307,9 @@ function WagerComponent() {
 
     try {
       const tx = await program.methods
-        .initializeWager(player1, player2, arbiter, feeRecipient, wagerAmount)
+        .initializeWager(player1, player2, arbiter, feeRecipient, wagerAmount, gameId)
         .accounts({
           wager: wagerPda,
-          vault: vaultPda,
           payer: wallet.publicKey,
           systemProgram: web3.SystemProgram.programId,
         })
@@ -350,21 +330,14 @@ function WagerComponent() {
     
     const player1 = new web3.PublicKey('PLAYER1_ADDRESS_HERE');
     const player2 = new web3.PublicKey('PLAYER2_ADDRESS_HERE');
+    const gameId = new BN(12345); // Use actual game ID
     
     const [wagerPda] = web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from('wager'),
         player1.toBuffer(),
-        player2.toBuffer()
-      ],
-      program.programId
-    );
-
-    const [vaultPda] = web3.PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('vault'),
-        player1.toBuffer(),
-        player2.toBuffer()
+        player2.toBuffer(),
+        gameId.toArrayLike(Buffer, 'le', 8)
       ],
       program.programId
     );
@@ -376,7 +349,6 @@ function WagerComponent() {
       const tx = await program.methods[isPlayer1 ? 'depositPlayer1' : 'depositPlayer2']()
         .accounts({
           wager: wagerPda,
-          vault: vaultPda,
           [isPlayer1 ? 'player1' : 'player2']: wallet.publicKey,
           systemProgram: web3.SystemProgram.programId,
         })
@@ -401,76 +373,6 @@ function WagerComponent() {
 
 ---
 
-### Approach 3: Manual Transaction Building (Advanced)
-
-```typescript
-import { 
-  Connection, 
-  PublicKey, 
-  Transaction, 
-  TransactionInstruction,
-  SystemProgram,
-  LAMPORTS_PER_SOL
-} from '@solana/web3.js';
-import * as borsh from '@coral-xyz/borsh';
-
-// Manual instruction building (useful for advanced use cases)
-async function manualInitializeWager(
-  connection: Connection,
-  payer: PublicKey,
-  player1: PublicKey,
-  player2: PublicKey,
-  arbiter: PublicKey,
-  feeRecipient: PublicKey,
-  wagerAmountSol: number
-) {
-  const programId = new PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
-  
-  // Derive PDA
-  const [wagerPda] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('wager'),
-      player1.toBuffer(),
-      player2.toBuffer()
-    ],
-    programId
-  );
-
-  // Create instruction data
-  // This requires knowing the exact instruction discriminator and data layout
-  // It's much easier to use Anchor, but this shows what's happening under the hood
-  
-  const instructionData = Buffer.concat([
-    // Instruction discriminator (first 8 bytes of SHA256("global:initialize_wager"))
-    Buffer.from([/* discriminator bytes */]),
-    // Instruction arguments serialized
-    player1.toBuffer(),
-    player2.toBuffer(),
-    arbiter.toBuffer(),
-    feeRecipient.toBuffer(),
-    // wager amount as u64 little-endian
-    Buffer.from(new Uint8Array(new BigUint64Array([BigInt(wagerAmountSol * LAMPORTS_PER_SOL)]).buffer))
-  ]);
-
-  const instruction = new TransactionInstruction({
-    keys: [
-      { pubkey: wagerPda, isSigner: false, isWritable: true },
-      { pubkey: payer, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    programId,
-    data: instructionData,
-  });
-
-  const transaction = new Transaction().add(instruction);
-  
-  // Sign and send transaction
-  return transaction;
-}
-```
-
----
-
 ## Real-World Usage Example
 
 Here's a complete example showing a typical game flow:
@@ -487,21 +389,17 @@ class WagerManager {
   
   constructor(connection: Connection, wallet: Wallet) {
     this.provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
-    const programId = new web3.PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
+    const programId = new web3.PublicKey('5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN');
     this.program = new Program<SliderPvp>(idl as any, programId, this.provider);
   }
 
-  // Helper to get wager and vault PDAs
-  getPDAs(player1: PublicKey, player2: PublicKey) {
+  // Helper to get wager PDA
+  getWagerPDA(player1: PublicKey, player2: PublicKey, gameId: BN) {
     const [wagerPda] = web3.PublicKey.findProgramAddressSync(
-      [Buffer.from('wager'), player1.toBuffer(), player2.toBuffer()],
+      [Buffer.from('wager'), player1.toBuffer(), player2.toBuffer(), gameId.toArrayLike(Buffer, 'le', 8)],
       this.program.programId
     );
-    const [vaultPda] = web3.PublicKey.findProgramAddressSync(
-      [Buffer.from('vault'), player1.toBuffer(), player2.toBuffer()],
-      this.program.programId
-    );
-    return { wagerPda, vaultPda };
+    return wagerPda;
   }
 
   // Create a new wager
@@ -510,16 +408,17 @@ class WagerManager {
     player2: PublicKey,
     arbiter: PublicKey,
     feeRecipient: PublicKey,
-    wagerAmountSol: number
+    wagerAmountSol: number,
+    gameId: number
   ) {
-    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
+    const gameIdBn = new BN(gameId);
+    const wagerPda = this.getWagerPDA(player1, player2, gameIdBn);
     const wagerAmount = new BN(wagerAmountSol * web3.LAMPORTS_PER_SOL);
 
     const tx = await this.program.methods
-      .initializeWager(player1, player2, arbiter, feeRecipient, wagerAmount)
+      .initializeWager(player1, player2, arbiter, feeRecipient, wagerAmount, gameIdBn)
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         payer: this.provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId,
       })
@@ -527,14 +426,14 @@ class WagerManager {
 
     console.log(`✅ Wager created: ${tx}`);
     console.log(`📍 Wager PDA: ${wagerPda.toString()}`);
-    console.log(`📍 Vault PDA: ${vaultPda.toString()}`);
     
-    return { transaction: tx, wagerPda, vaultPda };
+    return { transaction: tx, wagerPda };
   }
 
   // Player deposits
-  async deposit(player1: PublicKey, player2: PublicKey, isPlayer1: boolean) {
-    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
+  async deposit(player1: PublicKey, player2: PublicKey, gameId: number, isPlayer1: boolean) {
+    const gameIdBn = new BN(gameId);
+    const wagerPda = this.getWagerPDA(player1, player2, gameIdBn);
     
     const method = isPlayer1 ? 'depositPlayer1' : 'depositPlayer2';
     const accountKey = isPlayer1 ? 'player1' : 'player2';
@@ -542,7 +441,6 @@ class WagerManager {
     const tx = await this.program.methods[method]()
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         [accountKey]: this.provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId,
       })
@@ -556,9 +454,11 @@ class WagerManager {
   async declareWinner(
     player1: PublicKey,
     player2: PublicKey,
+    gameId: number,
     winner: 1 | 2
   ) {
-    const { wagerPda, vaultPda } = this.getPDAs(player1, player2);
+    const gameIdBn = new BN(gameId);
+    const wagerPda = this.getWagerPDA(player1, player2, gameIdBn);
     const wagerAccount = await this.program.account.wager.fetch(wagerPda);
     
     const winnerAccount = winner === 1 ? wagerAccount.player1 : wagerAccount.player2;
@@ -567,10 +467,10 @@ class WagerManager {
       .declareWinner(winner)
       .accounts({
         wager: wagerPda,
-        vault: vaultPda,
         arbiter: this.provider.wallet.publicKey,
         winnerAccount: winnerAccount,
         feeRecipient: wagerAccount.feeRecipient,
+        payerAccount: wagerAccount.payer,
         systemProgram: web3.SystemProgram.programId,
       })
       .rpc();
@@ -578,109 +478,8 @@ class WagerManager {
     console.log(`✅ Winner declared (Player ${winner}): ${tx}`);
     return tx;
   }
-
-  // Get wager status
-  async getWagerStatus(player1: PublicKey, player2: PublicKey) {
-    const { wagerPda } = this.getPDAs(player1, player2);
-    
-    try {
-      const wagerAccount = await this.program.account.wager.fetch(wagerPda);
-      
-      return {
-        exists: true,
-        wagerAmount: wagerAccount.wagerAmount.toNumber() / web3.LAMPORTS_PER_SOL,
-        player1Deposited: wagerAccount.player1Deposited,
-        player2Deposited: wagerAccount.player2Deposited,
-        bothDeposited: wagerAccount.player1Deposited && wagerAccount.player2Deposited,
-        isSettled: wagerAccount.isSettled,
-        winner: wagerAccount.winner,
-        timeRemaining: this.calculateTimeRemaining(wagerAccount),
-      };
-    } catch (error) {
-      return { exists: false };
-    }
-  }
-
-  private calculateTimeRemaining(wagerAccount: any): number | null {
-    if (!wagerAccount.player1Deposited || !wagerAccount.player2Deposited) {
-      return null;
-    }
-    
-    const TIMEOUT_SECONDS = 120;
-    const now = Math.floor(Date.now() / 1000);
-    const startTime = wagerAccount.startTime.toNumber();
-    const elapsed = now - startTime;
-    const remaining = TIMEOUT_SECONDS - elapsed;
-    
-    return Math.max(0, remaining);
-  }
-
-  // Listen for wager events
-  async subscribeToWager(
-    player1: PublicKey,
-    player2: PublicKey,
-    callback: (wagerData: any) => void
-  ) {
-    const { wagerPda } = this.getPDAs(player1, player2);
-    
-    const subscriptionId = this.provider.connection.onAccountChange(
-      wagerPda,
-      async (accountInfo) => {
-        const wagerData = await this.program.account.wager.fetch(wagerPda);
-        callback(wagerData);
-      }
-    );
-    
-    return subscriptionId;
-  }
-}
-
-// Usage example
-async function fullGameFlow() {
-  const connection = new Connection('https://api.devnet.solana.com');
-  
-  // In a real app, these would come from wallet adapter
-  const player1Wallet = Keypair.generate(); // Replace with actual wallet
-  const player2Pubkey = new PublicKey('PLAYER2_PUBLIC_KEY');
-  const arbiterPubkey = new PublicKey('ARBITER_PUBLIC_KEY');
-  const feePubkey = new PublicKey('FEE_RECIPIENT_PUBLIC_KEY');
-  
-  const manager = new WagerManager(connection, new Wallet(player1Wallet));
-  
-  // 1. Create wager
-  const { wagerPda } = await manager.createWager(
-    player1Wallet.publicKey,
-    player2Pubkey,
-    arbiterPubkey,
-    feePubkey,
-    0.1 // 0.1 SOL wager
-  );
-  
-  // 2. Subscribe to updates
-  await manager.subscribeToWager(
-    player1Wallet.publicKey,
-    player2Pubkey,
-    (wagerData) => {
-      console.log('Wager updated:', wagerData);
-    }
-  );
-  
-  // 3. Player 1 deposits
-  await manager.deposit(player1Wallet.publicKey, player2Pubkey, true);
-  
-  // 4. Player 2 deposits (would be in different client)
-  // await manager.deposit(player1Wallet.publicKey, player2Pubkey, false);
-  
-  // 5. Check status
-  const status = await manager.getWagerStatus(player1Wallet.publicKey, player2Pubkey);
-  console.log('Wager status:', status);
-  
-  // 6. Arbiter declares winner (after game ends)
-  // await manager.declareWinner(player1Wallet.publicKey, player2Pubkey, 1);
 }
 ```
-
----
 
 ## Error Handling
 
@@ -715,8 +514,6 @@ async function handleWagerTransaction() {
 }
 ```
 
----
-
 ## Important Constants
 
 ```typescript
@@ -726,16 +523,12 @@ const WINNER_PERCENTAGE = 95; // Winner gets 95%
 const FEE_PERCENTAGE = 5; // Platform fee is 5%
 ```
 
----
-
 ## Testing on Devnet
 
 1. Deploy to devnet: `anchor deploy --provider.cluster devnet`
 2. Update program ID in your frontend
 3. Use devnet connection: `new Connection('https://api.devnet.solana.com')`
 4. Get devnet SOL from faucet: `solana airdrop 2`
-
----
 
 ## Production Checklist
 
@@ -752,11 +545,8 @@ const FEE_PERCENTAGE = 5; // Platform fee is 5%
 - [ ] Security audit completed
 - [ ] Set up monitoring for program account
 
----
-
 ## Resources
 
 - [Anchor Documentation](https://www.anchor-lang.com/)
 - [Solana Web3.js Documentation](https://solana-labs.github.io/solana-web3.js/)
 - [Solana Wallet Adapter](https://github.com/solana-labs/wallet-adapter)
-

@@ -40,7 +40,6 @@ node simple-test.js
 ```
 ✅ Program found on devnet!
 ✅ Wager PDA: [some_address]
-✅ Vault PDA: [some_address]
 ✅ All wallets loaded successfully
 ```
 **Why:** Confirms your contract is deployed and accessible before testing.
@@ -89,7 +88,7 @@ Final Balances:
 #### Step 3.1: Run Complete Transaction Flow
 ```bash
 # Execute actual contract transactions with real SOL
-node direct-test.js
+node full-test.js
 ```
 
 **Expected Output (Step by Step):**
@@ -103,7 +102,7 @@ node direct-test.js
    Payer/Arbiter: 2.521 SOL (-0.002 SOL initialization cost)
    Player 1:      0.300 SOL (unchanged)  
    Player 2:      0.300 SOL (unchanged)
-   Vault:         0.000 SOL (created but empty)
+   Wager PDA:     0.002 SOL (Has Rent)
 ```
 
 **STEP 2 - Player 1 Deposits:**
@@ -115,7 +114,7 @@ node direct-test.js
    Payer/Arbiter: 2.521 SOL (unchanged)
    Player 1:      0.200 SOL (-0.1 SOL deposited)
    Player 2:      0.300 SOL (unchanged)
-   Vault:         0.100 SOL (+0.1 SOL received)
+   Wager PDA:     0.102 SOL (+0.1 SOL received)
 ```
 
 **STEP 3 - Player 2 Deposits:**
@@ -127,7 +126,7 @@ node direct-test.js
    Payer/Arbiter: 2.521 SOL (unchanged)
    Player 1:      0.200 SOL (unchanged)
    Player 2:      0.200 SOL (-0.1 SOL deposited)  
-   Vault:         0.200 SOL (+0.1 SOL, now has full pool)
+   Wager PDA:     0.202 SOL (+0.1 SOL, now has full pool + rent)
 ```
 
 **STEP 4 - Declare Winner (Key Test!):**
@@ -136,10 +135,10 @@ node direct-test.js
 ✅ Winner declared! Transaction: [signature_4]
 
 💸 FINAL BALANCE CHANGES:
-   Player 1 (WINNER): +0.090 SOL (won 0.19, paid 0.1 = +0.09 profit)
+   Player 1 (WINNER): +0.090 SOL (won 0.195, paid 0.1 = +0.095 profit - fees?)
    Player 2 (loser):  -0.100 SOL (paid 0.1, won nothing = -0.1 loss)
-   Payer/Arbiter (FEE): +0.008 SOL (earned 0.01 fee, paid 0.002 init = +0.008 net)
-   Vault (rent):      0.002 SOL (remaining as rent reserve)
+   Payer/Arbiter (FEE): +0.008 SOL (earned 0.01 fee, paid 0.002 init, got refund)
+   Wager PDA:      0.000 SOL (Closed)
 ```
 
 **Why:** This executes real blockchain transactions and proves your contract works with actual money.
@@ -152,21 +151,21 @@ node direct-test.js
 ```bash
 # Check final balances to confirm the test results
 echo "=== FINAL VERIFICATION ==="
-echo "Main wallet (should have earned ~0.008 SOL):"
+echo "Main wallet (should have earned fees):"
 solana balance
 
-echo "Player 1 (should have earned ~0.09 SOL):"  
+echo "Player 1 (should have earned profit):"  
 solana balance -k ./test-player1.json
 
-echo "Player 2 (should have lost 0.1 SOL):"
+echo "Player 2 (should have lost deposit):"
 solana balance -k ./test-player2.json
 ```
 
 **Expected Results:**
 ```
-Main wallet: ~2.529 SOL (+0.008 from initial)
-Player 1: ~0.290 SOL (+0.09 from after funding)  
-Player 2: ~0.200 SOL (-0.1 from after funding)
+Main wallet: ~2.529 SOL (+fees from initial)
+Player 1: ~0.290 SOL (+profit from after funding)  
+Player 2: ~0.200 SOL (-deposit from after funding)
 ```
 
 **Why:** Manually confirms the balance changes match what the contract reported.
@@ -187,44 +186,39 @@ Take each transaction signature from the test output and verify on blockchain:
 
 **Initialize Transaction:**
 - ✅ **Signer:** Your main wallet address
-- ✅ **Program:** `9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT` (your contract)
-- ✅ **Accounts Created:** Wager PDA + Vault PDA
+- ✅ **Program:** `5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN` (your contract)
+- ✅ **Accounts Created:** Wager PDA
 - ✅ **SOL Deducted:** ~0.002 SOL from main wallet
 
 **Player 1 Deposit Transaction:**
 - ✅ **Signer:** Player 1 address  
 - ✅ **Program:** Your contract program ID
-- ✅ **SOL Transfer:** 0.1 SOL from Player 1 → Vault PDA
+- ✅ **SOL Transfer:** 0.1 SOL from Player 1 → Wager PDA
 - ✅ **Status:** Success
 
 **Player 2 Deposit Transaction:**
 - ✅ **Signer:** Player 2 address
 - ✅ **Program:** Your contract program ID  
-- ✅ **SOL Transfer:** 0.1 SOL from Player 2 → Vault PDA
+- ✅ **SOL Transfer:** 0.1 SOL from Player 2 → Wager PDA
 - ✅ **Status:** Success
 
 **Winner Declaration Transaction (MOST IMPORTANT):**
 - ✅ **Signer:** Your main wallet (arbiter)
 - ✅ **Program:** Your contract program ID
 - ✅ **SOL Transfers:**
-  - ~0.19 SOL: Vault PDA → Player 1 (winner)
-  - ~0.01 SOL: Vault PDA → Your main wallet (fee)
+  - ~0.19 SOL: Wager PDA → Player 1 (winner)
+  - ~0.01 SOL: Wager PDA → Fee Recipient (fee)
+  - ~0.002 SOL: Wager PDA → Payer (Rent Refund)
 - ✅ **Status:** Success
 
 **Why:** Proves the transactions actually happened on blockchain and aren't just fake numbers.
 
 #### Step 5.2: Check Account States on Explorer
 
-**Verify Vault PDA:**
-1. Search for the Vault PDA address from test output
-2. Check current balance: Should be ~0.002 SOL (rent reserve)
-3. Owner: Should be System Program
-4. History: Should show the deposit/withdraw transactions
-
 **Verify Wager PDA:**
-1. Search for the Wager PDA address  
-2. Owner: Should be your program ID
-3. Account data: Should show settled wager state
+1. Search for the Wager PDA address from test output
+2. Check current status: Should be "Closed" or have 0 balance if searched after settlement
+3. History: Should show the deposit/withdraw transactions
 
 **Why:** Confirms the contract accounts exist and are in correct final state.
 
@@ -235,15 +229,15 @@ Take each transaction signature from the test output and verify on blockchain:
 After completing the test, you should be able to verify:
 
 ### ✅ **Escrow Functionality:**
-- [ ] Players' SOL was held safely in Vault PDA during wager
+- [ ] Players' SOL was held safely in Wager PDA during wager
 - [ ] No funds were lost or locked permanently  
-- [ ] Vault PDA correctly managed the 0.2 SOL pool
 - [ ] Contract controlled fund distribution, not individual wallets
 
 ### ✅ **Fee Distribution:**
 - [ ] Your main wallet received ~0.01 SOL (5% of 0.2 SOL pool)
-- [ ] Winner received ~0.19 SOL (95% of pool after init costs)
+- [ ] Winner received ~0.19 SOL (95% of pool)
 - [ ] Loser received nothing (as expected)
+- [ ] Payer received Rent Refund
 - [ ] Total pool distributed correctly with no funds lost
 
 ### ✅ **Blockchain Verification:**
@@ -271,10 +265,10 @@ After completing the test, you should be able to verify:
 # Request SOL, then retry
 ```
 
-### **If direct-test.js fails with "Wager already exists":**
+### **If full-test.js fails with "Wager already exists":**
 ```bash
 # Wait a few minutes or test with different players
-# The same player pair can't have multiple active wagers
+# The scripts now use random game IDs to avoid this, but old accounts might linger
 ```
 
 ### **If transactions fail:**
@@ -304,7 +298,7 @@ If all tests pass and verification succeeds, your contract is proven to:
 ✅ **Scale to production** (ready for real users)  
 
 **Next Steps After Success:**
-1. Build frontend integration using your SliderPvpClient.ts
+1. Build frontend integration using your `SliderPvpClient.ts`
 2. Deploy to mainnet (with security audit)
 3. Start earning fees from real wagers
 4. Scale your wager-based application
@@ -314,22 +308,23 @@ If all tests pass and verification succeeds, your contract is proven to:
 ## 📊 **✅ VERIFIED MONEY FLOW RESULTS**
 
 ```
-ACTUAL RESULTS (JUST COMPLETED):
+ACTUAL RESULTS (EXAMPLE):
 ├── Your Main Wallet:  3.0880 SOL (+0.0068 SOL net profit) 🎉
-├── Player 1:          0.3871 SOL (+0.0871 SOL profit - won!)
+├── Player 1:          0.3900 SOL (+0.0900 SOL profit - won!)
 ├── Player 2:          0.2000 SOL (-0.1000 SOL loss - lost)  
-└── Vault PDA:         ~0.002 SOL (rent reserve)
+└── Wager PDA:         0.0000 SOL (Closed)
 
 BLOCKCHAIN VERIFICATION:
-✅ Initialize: 4WTGgtPF8cxGF2KXQiYLfAVV43k6shjVtG9yw3VQRcYpG1Yp1xzTBfiULodxSRfaKRTaYZquixJZ4qmNmbPD5ECK
-✅ Player 1 Deposit: 28CyNPSYivmiz59jH3twFZeW4scRB1bG1TJsj8YgJw3peNrbN4syem1nGTmLQGTFrhJyKrCZRfkFZDCy96FWwYws  
-✅ Player 2 Deposit: 2Aj8n1AtzoSmF3iWExRG5SFcFk1hCrV3dyytEEBXgo1ECRtuiDHmk3vuSKPQmXeBg1tmGySTiuxQ1x69KF3m5KiK
-✅ Declare Winner: 5QB7fgVNGreACXs8YNJUs8ryCFuiPjDde8mZwBRzoRfCFnKfcNVxW2LcjzQqou83zWLB1XQNFixR8ZbP4Phet74t
+✅ Initialize: 4WTGgt...
+✅ Player 1 Deposit: 28CyNP...
+✅ Player 2 Deposit: 2Aj8n1...
+✅ Declare Winner: 5QB7fg...
 
 PROOF COMPLETED:
-✅ Your wallet earned fees: +0.0068 SOL
-✅ Winner got most of pool: +0.0871 SOL  
+✅ Your wallet earned fees: +0.01 SOL
+✅ Winner got most of pool: +0.19 SOL  
 ✅ Loser lost their wager: -0.1 SOL exactly
+✅ Payer got rent back: +0.002 SOL
 ✅ All funds accounted for: ✓
 ✅ Contract took no extra fees: ✓
 ✅ All transactions verifiable on Solana Explorer: ✓

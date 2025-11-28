@@ -18,16 +18,16 @@ Phase 1: INITIALIZATION
 │  • arbiter: Pubkey                                          │
 │  • fee_recipient: Pubkey                                    │
 │  • wager_amount: u64 (e.g., 0.5 SOL)                       │
+│  • game_id: u64 (unique identifier)                        │
 │                                                              │
-│  Result: Two PDAs created                                    │
-│  • Wager PDA - stores game state                           │
-│  • Vault PDA - stores deposited SOL                        │
+│  Result: One PDA created                                     │
+│  • Wager PDA - stores game state & holds funds              │
 │                                                              │
 │  State: player1_deposited = false                           │
 │         player2_deposited = false                           │
 │         start_time = 0                                       │
 │         is_settled = false                                   │
-│         initialization_cost = ~0.002 SOL (calculated)       │
+│         Balance = Rent (paid by Payer)                       │
 └──────────────────────────────────────────────────────────────┘
                           ↓
 
@@ -35,7 +35,7 @@ Phase 2: DEPOSITS (Order doesn't matter)
 ┌──────────────────────────────────────────────────────────────┐
 │  Player 1                    │  Player 2                     │
 │  Calls: deposit_player1()    │  Calls: deposit_player2()     │
-│  Transfers: 0.5 SOL → Vault  │  Transfers: 0.5 SOL → Vault   │
+│  Transfers: 0.5 SOL → Wager  │  Transfers: 0.5 SOL → Wager   │
 │                              │                               │
 │  State: player1_deposited    │  State: player2_deposited     │
 │         = true               │         = true                │
@@ -50,8 +50,7 @@ Phase 3: DECISION WINDOW (120 seconds)
 ┌──────────────────────────────────────────────────────────────┐
 │                     ⏱️  TIMER RUNNING                         │
 │                                                              │
-│  Vault Balance: 1.0 SOL (0.5 from each player)              │
-│  Wager PDA: Tracks state (no SOL stored)                   │
+│  Wager Balance: 1.0 SOL + Rent                               │
 │  Start Time: Unix timestamp                                  │
 │  Deadline: start_time + 120 seconds                         │
 └──────────────────────────────────────────────────────────────┘
@@ -84,25 +83,24 @@ PATH A: WINNER DECLARED
 ┌──────────────────────────────────────────────────────────────┐
 │  DISTRIBUTION                                                │
 │                                                              │
-│  Vault Balance: 1.0 SOL (0.5 from each player)             │
-│  Initialization Cost: ~0.002 SOL (deducted)                │
-│  Distributable Pool: 0.998 SOL                             │
+│  Pool: 1.0 SOL                                               │
 │                                                              │
-│  Transfer 1: 0.9481 SOL (95%) → Winner                     │
-│  Transfer 2: 0.0499 SOL (5%)  → Fee Recipient              │
-│  Remaining: ~0.002 SOL (stays in vault as rent)           │
+│  Transfer 1: 0.95 SOL (95%) → Winner                         │
+│  Transfer 2: 0.05 SOL (5%)  → Fee Recipient                  │
+│  Transfer 3: Rent Balance   → Payer (Refund)                 │
 │                                                              │
 │  State: winner = 1 or 2                                     │
 │         is_settled = true                                    │
+│         Account Closed                                       │
 └──────────────────────────────────────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
 │  ✅ SETTLEMENT COMPLETE                                      │
 │                                                              │
-│  Winner Balance: +0.4481 SOL (net: 0.5 deposited)          │
-│  Fee Recipient Balance: +0.0499 SOL                         │
+│  Winner Balance: +0.45 SOL (net: 0.5 deposited)             │
+│  Fee Recipient Balance: +0.05 SOL                            │
 │  Loser Balance: -0.5 SOL                                    │
-│  Vault Balance: ~0.002 SOL (rent-exempt minimum)           │
+│  Payer Balance: +Rent (Full Refund)                         │
 └──────────────────────────────────────────────────────────────┘
 
 
@@ -123,24 +121,23 @@ PATH B: TIMEOUT EXPIRES
 ┌──────────────────────────────────────────────────────────────┐
 │  REFUND                                                      │
 │                                                              │
-│  Vault Balance: 1.0 SOL (0.5 from each player)             │
-│  Initialization Cost: ~0.002 SOL (deducted)                │
-│  Distributable: 0.998 SOL                                   │
+│  Pool: 1.0 SOL                                               │
 │                                                              │
-│  Transfer 1: 0.499 SOL → Player 1                           │
-│  Transfer 2: 0.499 SOL → Player 2                           │
-│  Remaining: ~0.002 SOL (stays in vault as rent)            │
+│  Transfer 1: 0.5 SOL → Player 1                              │
+│  Transfer 2: 0.5 SOL → Player 2                              │
+│  Transfer 3: Rent Balance → Payer                            │
 │                                                              │
 │  State: is_settled = true                                    │
 │         winner = None                                        │
+│         Account Closed                                       │
 └──────────────────────────────────────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
 │  ✅ REFUND COMPLETE                                          │
 │                                                              │
-│  Player 1 Balance: -0.001 SOL (net after refund)           │
-│  Player 2 Balance: -0.001 SOL (net after refund)           │
-│  Vault Balance: ~0.002 SOL (rent-exempt minimum)           │
+│  Player 1 Balance: 0 SOL change                              │
+│  Player 2 Balance: 0 SOL change                              │
+│  Payer Balance: 0 SOL change                                 │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -183,16 +180,12 @@ PATH B: TIMEOUT EXPIRES
     WINNER_DECLARED            TIMEOUT_REACHED
     (winner = 1 or 2)          (refund available)
     (is_settled = true)               │
-            │                    refund()
-            │                         │
-            │                         ↓
-            │                  REFUNDED
-            │                  (is_settled = true)
-            │                         │
-            └─────────────┬───────────┘
-                          ↓
-                      SETTLED
-                (Final state, cannot be changed)
+    (Account Closed)              refund()
+                                      │
+                                      ↓
+                               REFUNDED
+                               (is_settled = true)
+                               (Account Closed)
 ```
 
 ## Role Permissions
@@ -209,36 +202,11 @@ PATH B: TIMEOUT EXPIRES
 │  Player 2         │  • deposit_player2() (once)              │
 ├─────────────────────────────────────────────────────────────┤
 │  Arbiter          │  • declare_winner() (within 120s)        │
+│                   │  • cancel_wager() (if deposit timeout)   │
 ├─────────────────────────────────────────────────────────────┤
 │  Fee Recipient    │  • Receives 5% of pool when winner       │
 │                   │    is declared                           │
 └─────────────────────────────────────────────────────────────┘
-```
-
-## Time Constraints
-
-```
-Timeline:
-─────────────────────────────────────────────────────────────────
-
-t=0         Player deposits complete
-│           start_time = current_timestamp
-│
-│  ┌─────── DECISION WINDOW (120 seconds) ──────┐
-│  │                                             │
-│  │  Arbiter CAN declare winner                │
-│  │  Refund CANNOT be called                   │
-│  │                                             │
-│  └─────────────────────────────────────────────┘
-│
-t=120s      Timeout expires
-│           
-│  ┌─────── REFUND WINDOW (indefinite) ─────────┐
-│  │                                             │
-│  │  Arbiter CANNOT declare winner             │
-│  │  Refund CAN be called by anyone            │
-│  │                                             │
-│  └─────────────────────────────────────────────┘
 ```
 
 ## Error Flow
@@ -284,21 +252,18 @@ Player 1 Wallet                 Player 2 Wallet
      │                               │
      │ -0.5 SOL                     │ -0.5 SOL
      ↓                               ↓
-              Vault PDA (Escrow)
-                  1.0 SOL
+              Wager PDA (Escrow)
+                 1.0 SOL + Rent
                      │
      ┌───────────────┼───────────────┐
      │               │               │
-     │  Deduct Init Cost (~0.002 SOL)│
+     │   95% to P1   │   5% to Fee   │
      │               │               │
-     │    Distributable: 0.998 SOL   │
+     ├───────────────┼───────────────┤
      │               │               │
-     ├───────────────┴───────────────┤
-     │                               │
-     │ 0.9481 SOL (95%)             │ 0.0499 SOL (5%)
-     ↓                               ↓
-Player 1 Wallet                Fee Recipient
-NET: +0.4481 SOL               NET: +0.0499 SOL
+     ↓               ↓               ↓
+Player 1 Wallet  Fee Recipient     Payer Wallet
++0.45 SOL        +0.05 SOL         +Rent Refund
 
 
 SCENARIO 2: Timeout Refund
@@ -308,62 +273,18 @@ Player 1 Wallet                 Player 2 Wallet
      │                               │
      │ -0.5 SOL                     │ -0.5 SOL
      ↓                               ↓
-              Vault PDA (Escrow)
-                  1.0 SOL
+              Wager PDA (Escrow)
+                 1.0 SOL + Rent
                      │
      ┌───────────────┼───────────────┐
      │               │               │
-     │  Deduct Init Cost (~0.002 SOL)│
+     │   50% to P1   │   50% to P2   │
      │               │               │
-     │    Distributable: 0.998 SOL   │
+     ├───────────────┼───────────────┤
      │               │               │
-     ├───────────────┴───────────────┤
-     │                               │
-     │ 0.499 SOL (50%)              │ 0.499 SOL (50%)
-     ↓                               ↓
-Player 1 Wallet                 Player 2 Wallet
-NET: -0.001 SOL                 NET: -0.001 SOL
-```
-
-## Integration Points
-
-```
-┌────────────────────────────────────────────────────────────┐
-│  TYPICAL SYSTEM ARCHITECTURE                               │
-└────────────────────────────────────────────────────────────┘
-
-    Frontend (React/Vue/etc)
-           │
-           │ User interactions
-           ↓
-    ┌──────────────────┐
-    │  Wallet Adapter  │  (Phantom, Solflare, etc)
-    └──────────────────┘
-           │
-           │ Sign transactions
-           ↓
-    ┌──────────────────┐
-    │  Anchor Client   │  (TypeScript SDK)
-    └──────────────────┘
-           │
-           │ RPC calls
-           ↓
-    ┌──────────────────┐
-    │  Solana RPC Node │  (Devnet/Mainnet)
-    └──────────────────┘
-           │
-           │ Program execution
-           ↓
-    ┌──────────────────┐
-    │  Slider PvP      │  (On-chain program)
-    │  Contract        │
-    └──────────────────┘
-           │
-           │ Transfers
-           ↓
-    ┌──────────────────┐
-    │  System Program  │  (Native Solana)
-    └──────────────────┘
+     ↓               ↓               ↓
+Player 1 Wallet  Player 2 Wallet   Payer Wallet
++0.5 SOL         +0.5 SOL          +Rent Refund
 ```
 
 ## Best Practices
@@ -400,4 +321,3 @@ NET: -0.001 SOL                 NET: -0.001 SOL
 *This flow diagram is part of the Slider PvP Contract documentation.*
 *For implementation details, see `programs/slider-pvp/src/lib.rs`*
 *For deployment instructions, see `DEPLOYMENT.md`*
-

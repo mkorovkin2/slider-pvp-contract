@@ -79,7 +79,7 @@ Finished release [optimized] target(s)
 solana address -k target/deploy/slider_pvp-keypair.json
 ```
 
-Copy this address (it should match `Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS` or you need to update it).
+Copy this address (it should match `5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN` or `HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5` depending on your config).
 
 ### 4. Configure Solana (10 seconds)
 
@@ -97,7 +97,7 @@ solana airdrop 2
 ### 5. Run Tests (1 minute)
 
 ```bash
-# Start local validator in a separate terminal
+# Start local validator in a separate terminal (optional, tests can run against devnet if configured)
 solana-test-validator
 
 # In the main terminal, run tests
@@ -157,31 +157,22 @@ async function quickTest() {
   const player2 = Keypair.generate();
   const arbiter = Keypair.generate();
   const feeRecipient = Keypair.generate();
+  const gameId = new anchor.BN(Date.now());
 
   console.log("✓ Generated test accounts");
 
-  // Derive wager PDA (stores game state)
+  // Derive wager PDA (stores game state AND funds)
   const [wagerPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [
       Buffer.from("wager"),
       player1.publicKey.toBuffer(),
       player2.publicKey.toBuffer(),
-    ],
-    program.programId
-  );
-
-  // Derive vault PDA (stores deposited SOL)
-  const [vaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("vault"),
-      player1.publicKey.toBuffer(),
-      player2.publicKey.toBuffer(),
+      gameId.toArrayLike(Buffer, "le", 8),
     ],
     program.programId
   );
 
   console.log("✓ Derived wager PDA:", wagerPda.toString());
-  console.log("✓ Derived vault PDA:", vaultPda.toString());
 
   // Initialize wager
   const wagerAmount = new anchor.BN(0.5 * LAMPORTS_PER_SOL);
@@ -192,11 +183,11 @@ async function quickTest() {
       player2.publicKey,
       arbiter.publicKey,
       feeRecipient.publicKey,
-      wagerAmount
+      wagerAmount,
+      gameId
     )
     .accounts({
       wager: wagerPda,
-      vault: vaultPda,
       payer: provider.wallet.publicKey,
     })
     .rpc();
@@ -242,7 +233,7 @@ solana airdrop 2
 ### Error: "Account does not exist"
 ```bash
 # Make sure you initialized the wager first
-# Check the PDA is derived correctly
+# Check the PDA is derived correctly (including game_id)
 ```
 
 ### Error: "Transaction simulation failed"
@@ -343,4 +334,3 @@ Declares winners as matches complete
 **Ready to build something awesome?** 🚀
 
 Start by modifying the test file to understand how the contract works, then build your frontend integration!
-

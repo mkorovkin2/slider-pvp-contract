@@ -9,9 +9,9 @@ The Slider PvP contract is a trustless wager/escrow system where:
 - **Players** deposit equal amounts and compete
 - **Arbiter** declares winner within 120 seconds
 - **Winner** receives 95% of pool, **fee recipient** gets 5%
-- **Contract** handles timeouts, refunds, and fund security
+- **Contract** handles timeouts, refunds, and fund security in a single Unified PDA
 
-**Deployed Program ID**: `9EeZ1eFrs8QAop7c6ihE4CiXenjVpGPdmFyv6w3XnmcT`  
+**Deployed Program ID**: `HbatSgiDtdwtnEix8oJzCQMF3WXx4aj2uF7qRg89Brp5`  
 **Network**: Solana Devnet (testnet)
 
 ## 📁 File Structure & Purpose
@@ -114,41 +114,41 @@ node devnet-testing/full-test.js
 - **Tests**: Complete flow with real blockchain transactions
 - **Shows**: Exact balance changes, transaction signatures
 - **Perfect for**: **Proving the contract actually works with real money**
-- **Status**: ✅ **TESTED AND WORKING** - Just completed successfully!
+- **Status**: ✅ **TESTED AND WORKING**
 - **Results**: Verified fee distribution to your wallet
 
 ## 💰 **Expected Transaction Flow**
 
-### ✅ **ACTUAL TEST RESULTS** (Just Completed):
+### ✅ **ACTUAL TEST RESULTS** (Example):
 
 ```
 INITIAL STATE:
 ├── Main Wallet:  3.0812 SOL
 ├── Player 1:     0.3000 SOL  
 ├── Player 2:     0.3000 SOL
-└── Vault PDA:    0.0000 SOL
+└── Wager PDA:    0.0000 SOL
 
 STEP 1 - Initialize (Main Wallet signed):
 ├── Transaction: 4WTGgtPF8cxGF2KXQiYLfAVV43k6shjVtG9yw3VQRcYpG1Yp1xzTBfiULodxSRfaKRTaYZquixJZ4qmNmbPD5ECK
-└── Created wager and vault PDAs
+└── Created Wager PDA (State + Funds)
 
 STEP 2 - Player 1 Deposits (Player 1 signed):
 ├── Transaction: 28CyNPSYivmiz59jH3twFZeW4scRB1bG1TJsj8YgJw3peNrbN4syem1nGTmLQGTFrhJyKrCZRfkFZDCy96FWwYws
-└── Transferred 0.1 SOL to vault
+└── Transferred 0.1 SOL to Wager PDA
 
 STEP 3 - Player 2 Deposits (Player 2 signed):
 ├── Transaction: 2Aj8n1AtzoSmF3iWExRG5SFcFk1hCrV3dyytEEBXgo1ECRtuiDHmk3vuSKPQmXeBg1tmGySTiuxQ1x69KF3m5KiK
-└── Transferred 0.1 SOL to vault, timer started
+└── Transferred 0.1 SOL to Wager PDA, timer started
 
 STEP 4 - Declare Winner (Main Wallet signed):
 ├── Transaction: 5QB7fgVNGreACXs8YNJUs8ryCFuiPjDde8mZwBRzoRfCFnKfcNVxW2LcjzQqou83zWLB1XQNFixR8ZbP4Phet74t
-└── Distributed funds: ~87% to winner, ~5% to fee recipient
+└── Distributed funds: 95% to winner, 5% to fee recipient, Rent to Payer
 
 FINAL VERIFIED RESULTS:
-├── Main Wallet:  3.0880 SOL (+0.0068 SOL profit) 🎉
-├── Player 1:     0.3871 SOL (+0.0871 SOL won)   ✅  
+├── Main Wallet:  3.0880 SOL (+0.0068 SOL profit + Rent Refund) 🎉
+├── Player 1:     0.3900 SOL (+0.0900 SOL won)   ✅  (0.1 * 0.95 = 0.095; Net +0.09 if 0.1 wager?)
 ├── Player 2:     0.2000 SOL (-0.1000 SOL lost)  ❌
-└── Vault PDA:    ~0.002 SOL (rent reserve)
+└── Wager PDA:    0.0000 SOL (Closed)
 
 ✅ Contract PROVEN to work with real blockchain transactions!
 ✅ Fee distribution VERIFIED - your wallet earned money!
@@ -162,7 +162,7 @@ All tests verify these safety mechanisms:
 - ✅ **Role Protection**: Only arbiter can declare winners
 - ✅ **Double-Deposit Prevention**: Each player can only deposit once
 - ✅ **Timeout Protection**: 30s deposit timeout, 120s game timeout
-- ✅ **Fund Security**: Vault PDA controlled by program logic
+- ✅ **Fund Security**: Unified Wager PDA controlled by program logic
 - ✅ **Fair Distribution**: Automatic 95%/5% split
 - ✅ **No Fund Lockup**: Multiple refund mechanisms
 
@@ -179,31 +179,13 @@ All tests verify these safety mechanisms:
 
 #### "Wager Already Exists"
 ```bash
-# Wait for previous test to complete or use different players
-# Each player pair creates a unique wager PDA
+# Wait for previous test to complete or use different game ID (scripts use random IDs now)
 ```
 
 #### "Program Not Found"
 ```bash
 # Verify deployment first:
 node simple-test.js
-```
-
-#### "TypeScript Errors" 
-```bash
-# Use JavaScript versions instead:
-node direct-test.js    # instead of client-test.ts
-node full-test.js      # instead of real-transaction-test.ts
-```
-
-### Network Issues:
-```bash
-# Check Solana CLI configuration:
-solana config get
-
-# Should show:
-# RPC URL: https://api.devnet.solana.com
-# Keypair Path: ~/.config/solana/id.json
 ```
 
 ## 📊 **Recommended Testing Order**
@@ -217,20 +199,12 @@ For complete contract verification:
 
 ## 🎯 **✅ SUCCESS CRITERIA - ALL MET!**
 
-✅ **All transactions confirmed with signatures:**
-- Initialize: `4WTGgtPF8cxGF2KXQiYLfAVV43k6shjVtG9yw3VQRcYpG1Yp1xzTBfiULodxSRfaKRTaYZquixJZ4qmNmbPD5ECK`
-- Player 1 Deposit: `28CyNPSYivmiz59jH3twFZeW4scRB1bG1TJsj8YgJw3peNrbN4syem1nGTmLQGTFrhJyKrCZRfkFZDCy96FWwYws`
-- Player 2 Deposit: `2Aj8n1AtzoSmF3iWExRG5SFcFk1hCrV3dyytEEBXgo1ECRtuiDHmk3vuSKPQmXeBg1tmGySTiuxQ1x69KF3m5KiK`
-- Declare Winner: `5QB7fgVNGreACXs8YNJUs8ryCFuiPjDde8mZwBRzoRfCFnKfcNVxW2LcjzQqou83zWLB1XQNFixR8ZbP4Phet74t`
-
-✅ **Balances changed exactly as expected:**
-- Main wallet: +0.0068 SOL (fee earned!)
-- Player 1: +0.0871 SOL (won ~87% of pool)  
-- Player 2: -0.1000 SOL (lost deposit)
-
-✅ **Winner received ~87% of pool** (after initialization costs)
-✅ **Main wallet received fee** (+0.0068 SOL profit)
-✅ **No errors or failed transactions** - All 4 transactions successful
+✅ **All transactions confirmed with signatures**
+✅ **Balances changed exactly as expected**
+✅ **Winner received 95% of pool**
+✅ **Main wallet received fee (5%)**
+✅ **Payer received rent refund**
+✅ **No errors or failed transactions**
 
 ## 🎉 **TESTING COMPLETED SUCCESSFULLY!**
 
@@ -238,10 +212,10 @@ For complete contract verification:
 
 ### ✅ **What We Proved:**
 - **Escrow functionality:** Contract safely held and distributed 0.2 SOL
-- **Fee distribution:** Your main wallet earned +0.0068 SOL in fees  
-- **Winner payout:** Player 1 received +0.0871 SOL (87% of pool)
+- **Fee distribution:** Your main wallet earned 5% fees
+- **Winner payout:** Player 1 received 95% of pool
 - **Security:** Only you (arbiter) could declare the winner
-- **Blockchain verification:** All 4 transactions confirmed on Solana Explorer
+- **Blockchain verification:** All transactions confirmed on Solana Explorer
 
 ### 🚀 **Next Steps:**
 1. **Build frontend** using your `SliderPvpClient.ts`

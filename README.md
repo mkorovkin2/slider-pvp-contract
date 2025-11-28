@@ -6,11 +6,12 @@ A trustless wager/escrow smart contract for Solana that enables fair player-vs-p
 
 This Solana smart contract acts as a trustless wager or escrow system between two participants. Both players deposit a fixed amount of SOL into the contract, and an authorized arbiter determines the winner within a 120-second window. The contract automatically distributes 95% of the pool to the winner and 5% to a fee recipient.
 
-**Architecture:** Uses a dual-PDA design with a separate vault PDA for secure SOL storage and a wager PDA for state management. Initialization costs are automatically deducted from the final payout pool. 
+**Architecture:** Uses a single Wager PDA that handles both state management and secure SOL storage. Initialization rent costs are paid by the payer and fully refunded when the wager is settled.
 
 **Key Safety Features:**
 - If only one player deposits, they can get their funds back after 30 seconds (deposit timeout)
 - If both players deposit but no winner is declared within 120 seconds, both can reclaim their deposits
+- Funds are never locked; timeout mechanisms ensure recoverability
 
 ## 🚀 Mainnet Deployment
 
@@ -40,46 +41,46 @@ This contract has undergone comprehensive security remediation. All 9 CRITICAL a
 
 ## Features
 
-- ✅ **Trustless Escrow**: Funds held in separate vault PDA (SOL-only storage)
-- ✅ **Dual-PDA Architecture**: State management in wager PDA, funds in vault PDA
-- ✅ **Automated Payouts**: 95% to winner, 5% to fee recipient (after initialization cost)
-- ✅ **Fair Cost Distribution**: Initialization rent automatically deducted from player pool
+- ✅ **Trustless Escrow**: Funds held in the program-controlled Wager PDA
+- ✅ **Unified PDA Architecture**: Efficient single-account design for state and funds
+- ✅ **Automated Payouts**: 95% to winner, 5% to fee recipient
+- ✅ **Rent Refund**: Initialization rent is fully refunded to the payer upon settlement
 - ✅ **Deposit Timeout Protection**: 30-second window for both players to deposit
 - ✅ **Game Timeout Protection**: 120-second window for arbiter to declare winner
 - ✅ **No-Show Refunds**: If opponent doesn't deposit within 30 seconds, get your money back
 - ✅ **Role-Based Access**: Only designated arbiter can declare winners
 - ✅ **Transparent On-Chain**: All rules enforced by smart contract
 - ✅ **Prevents Double-Spending**: Each player can only deposit once
-- ✅ **Direct Lamport Transfers**: Efficient SOL transfers without System Program overhead
 
 ## How It Works
 
 ### Normal Flow (Both Players Participate)
 
-1. **Initialize**: Create a wager with two player addresses, an arbiter, and a fee recipient
-   - Creates wager PDA (stores game state)
-   - Creates vault PDA (stores deposited SOL)
-   - Calculates and tracks initialization cost (~0.002 SOL)
-2. **Deposit Phase** (30-second window): Both players deposit the agreed-upon SOL amount into vault PDA
-3. **Game Timer Starts**: Once both deposits are made, a 120-second countdown begins
+1. **Initialize**: Create a wager with two player addresses, an arbiter, a fee recipient, and a unique game ID.
+   - Creates Wager PDA (stores game state and will hold funds)
+   - Payer funds the rent for the PDA
+2. **Deposit Phase** (30-second window): Both players deposit the agreed-upon SOL amount into the Wager PDA.
+3. **Game Timer Starts**: Once both deposits are made, a 120-second countdown begins.
 4. **Decision Window**: 
    - Arbiter can declare a winner (within 120 seconds)
-   - Winner receives 95% of the pool (after deducting initialization cost)
-   - Fee recipient receives 5% of the pool (after deducting initialization cost)
+   - Winner receives 95% of the wager pool
+   - Fee recipient receives 5% of the wager pool
+   - The Wager PDA is closed, and the rent is refunded to the original payer
 5. **Game Timeout Refund** (if needed): 
    - If no winner is declared within 120 seconds
    - Anyone can trigger a refund
-   - Both players receive their deposits back (minus initialization cost split equally)
+   - Both players receive their full deposits back
+   - The Wager PDA is closed, and the rent is refunded to the original payer
 
 ### No-Show Protection (One Player Doesn't Deposit)
 
-1. **Initialize**: Wager and vault PDAs are created
-2. **Partial Deposit**: Only one player deposits into vault within the first 30 seconds
-3. **Deposit Timeout**: After 30 seconds from wager creation
+1. **Initialize**: Wager PDA is created.
+2. **Partial Deposit**: Only one player deposits into the Wager PDA within the first 30 seconds.
+3. **Deposit Timeout**: After 30 seconds from wager creation.
 4. **Cancel & Refund**:
    - Anyone can call `cancel_wager()` after 30 seconds
-   - The player who deposited receives their amount back (minus initialization cost)
-   - Initialization cost (~0.002 SOL) is deducted since opponent didn't show
+   - The player who deposited receives their full amount back
+   - The Wager PDA is closed, and the rent is refunded to the original payer
 
 ## Project Structure
 
@@ -138,23 +139,15 @@ const PROGRAM_ID = new PublicKey("5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN")
 
 // Initialize wager
 const wagerAmount = new anchor.BN(0.5 * LAMPORTS_PER_SOL); // 0.5 SOL per player
+const gameId = new anchor.BN(12345); // Unique game identifier
 
-// Derive wager PDA (stores game state)
+// Derive wager PDA (stores game state and funds)
 const [wagerPda] = PublicKey.findProgramAddressSync(
   [
     Buffer.from("wager"),
     player1.publicKey.toBuffer(),
     player2.publicKey.toBuffer(),
-  ],
-  program.programId
-);
-
-// Derive vault PDA (stores deposited SOL)
-const [vaultPda] = PublicKey.findProgramAddressSync(
-  [
-    Buffer.from("vault"),
-    player1.publicKey.toBuffer(),
-    player2.publicKey.toBuffer(),
+    gameId.toArrayLike(Buffer, "le", 8),
   ],
   program.programId
 );
@@ -165,11 +158,11 @@ await program.methods
     player2.publicKey,
     arbiter.publicKey,
     feeRecipient.publicKey,
-    wagerAmount
+    wagerAmount,
+    gameId
   )
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     payer: payer.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -180,7 +173,6 @@ await program.methods
   .depositPlayer1()
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     player1: player1.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -192,10 +184,10 @@ await program.methods
   .declareWinner(1) // 1 for player1, 2 for player2
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     arbiter: arbiter.publicKey,
     winnerAccount: player1.publicKey,
     feeRecipient: feeRecipient.publicKey,
+    payerAccount: payer.publicKey, // Receives rent refund
     systemProgram: SystemProgram.programId,
   })
   .signers([arbiter])
@@ -206,9 +198,10 @@ await program.methods
   .cancelWager()
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
-    player1: player1.publicKey,
-    player2: player2.publicKey,
+    arbiter: arbiter.publicKey,
+    player1: player1.publicKey, // Required for refund if deposited
+    player2: player2.publicKey, // Required for refund if deposited
+    payerAccount: payer.publicKey, // Receives rent refund
     systemProgram: SystemProgram.programId,
   })
   .rpc();
@@ -225,6 +218,7 @@ Creates a new wager escrow account.
 - `arbiter`: Pubkey - Authorized arbiter wallet
 - `fee_recipient`: Pubkey - Fee recipient wallet
 - `wager_amount`: u64 - Amount each player must deposit (in lamports)
+- `game_id`: u64 - Unique identifier for the game
 
 ### 2. `deposit_player1`
 Player 1 deposits their wager amount.
@@ -270,12 +264,12 @@ Cancels the wager and refunds any deposited player if the other player fails to 
 - Deposit timeout (30 seconds) must have passed since wager creation
 - NOT both players have deposited (at least one missing)
 - Wager must not be settled
-- Can be called by anyone
+- Can be called by arbiter
 
 **Behavior:**
 - Refunds player 1 if they deposited
 - Refunds player 2 if they deposited
-- No action if neither deposited (just marks as settled)
+- Closes Wager PDA and refunds rent to payer
 
 ## Testing
 
@@ -298,23 +292,19 @@ Run tests:
 anchor test
 ```
 
-**Note:** Some tests require time manipulation (30s and 120s timeouts). For full test coverage with actual time-based scenarios, use Solana test validator's `warp` feature or similar time control mechanisms.
-
 ## Security Features
 
-1. **Dual-PDA Architecture**: 
-   - Wager PDA (state storage) - holds game logic and validation
-   - Vault PDA (SOL storage) - holds deposited funds separate from data
-   - No private keys - all funds controlled by program logic
-2. **Direct Lamport Transfers**: Efficient fund transfers via lamport manipulation
-3. **Role-Based Permissions**: Only arbiter can declare winner
-4. **Dual Time-Lock Protection**: 
-   - Deposit timeout (30s) protects against no-show opponents
-   - Game timeout (120s) protects against arbiter failure
-5. **State Validation**: Prevents double deposits and double settlements
-6. **Deterministic PDAs**: Unique wager and vault accounts per player pair
-7. **No Fund Lockup**: Players can always retrieve funds via timeout mechanisms
-8. **Fair Cost Distribution**: Initialization rent costs deducted from player pool, not from payer
+1. **Unified PDA Architecture**: 
+   - Single Wager PDA holds both state and funds, reducing complexity and CPI overhead.
+   - No private keys - all funds controlled by program logic.
+2. **Role-Based Permissions**: Only arbiter can declare winner.
+3. **Dual Time-Lock Protection**: 
+   - Deposit timeout (30s) protects against no-show opponents.
+   - Game timeout (120s) protects against arbiter failure.
+4. **State Validation**: Prevents double deposits and double settlements.
+5. **Deterministic PDAs**: Unique wager accounts per player pair and game ID.
+6. **No Fund Lockup**: Players can always retrieve funds via timeout mechanisms.
+7. **Rent Refund**: Initialization rent is returned to the payer, ensuring no dust is lost.
 
 ## Configuration
 
@@ -325,45 +315,30 @@ const TIMEOUT_SECONDS: i64 = 120;              // Game timeout: 2-minute window
 const DEPOSIT_TIMEOUT_SECONDS: i64 = 30;       // Deposit timeout: 30-second window
 const WINNER_PERCENTAGE: u64 = 95;             // 95% to winner
 const FEE_PERCENTAGE: u64 = 5;                 // 5% to fee recipient
+const MAX_WAGER_AMOUNT: u64 = 1_000_000_000_000; // 1000 SOL
 ```
-
-**Timeout Explanations:**
-- `DEPOSIT_TIMEOUT_SECONDS`: How long to wait for both players to deposit before allowing cancellation
-- `TIMEOUT_SECONDS`: How long arbiter has to declare winner after both players deposit
-
-Modify these values before deployment to adjust contract behavior.
 
 ## Cost Structure
 
 ### Initialization Costs
-When a wager is created, two PDAs are initialized:
-- **Wager PDA** (~0.00116 SOL rent) - stores game state
-- **Vault PDA** (~0.00089 SOL rent) - stores deposited funds
-- **Total**: ~0.00205 SOL per wager
+When a wager is created, the Wager PDA is initialized:
+- **Wager PDA** rent: ~0.00116 SOL (paid by payer)
 
 ### Cost Distribution
-The initialization cost is **automatically deducted from the player pool** before payouts:
+- **Rent**: Paid by `payer` at initialization, fully refunded to `payer` at settlement.
+- **Wager**: Paid by `player1` and `player2`.
+- **Payout**: Winner receives 95% of total wager pool, Fee Recipient receives 5%.
 
 **Example: 0.5 SOL per player**
 ```
 Total deposited: 1.0 SOL (0.5 + 0.5)
-Initialization cost: -0.002 SOL
-Distributable pool: 0.998 SOL
+Payer Rent Deposit: ~0.00116 SOL
 
-Winner (95%): 0.9481 SOL (net: +0.4481 SOL profit)
-Fee (5%): 0.0499 SOL
-Remaining: 0.002 SOL (stays in vault as rent)
+On Settlement:
+Winner (95%): 0.95 SOL
+Fee (5%): 0.05 SOL
+Payer Refund: ~0.00116 SOL
 ```
-
-**Impact by Wager Size:**
-| Per Player | Total Pool | Init Cost | % Impact |
-|------------|------------|-----------|----------|
-| 0.1 SOL | 0.2 SOL | 0.002 SOL | 1.0% |
-| 0.5 SOL | 1.0 SOL | 0.002 SOL | 0.2% |
-| 1.0 SOL | 2.0 SOL | 0.002 SOL | 0.1% |
-| 10 SOL | 20 SOL | 0.002 SOL | 0.01% |
-
-**Note:** Larger wagers have negligible initialization cost impact.
 
 ## Deployment
 
@@ -381,63 +356,12 @@ const connection = new Connection(clusterApiUrl("mainnet-beta"), "confirmed");
 const PROGRAM_ID = new PublicKey("5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN");
 ```
 
-**Monitoring:**
-```bash
-# Check program status
-solana program show 5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN --url mainnet-beta
-
-# Monitor program logs
-solana logs 5Nz9sKCgrJ4ToYizMkud3pscBTGf5XJXmHvJvhEg4UgN --url mainnet-beta
-```
-
 ### Development & Testing
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions for:
-- Local development
-- Devnet deployment
-- Custom deployments
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 
 **Full Deployment Report:** [MAINNET_DEPLOYMENT_REPORT.md](MAINNET_DEPLOYMENT_REPORT.md)
-
-## Error Codes
-
-| Code | Error | Description |
-|------|-------|-------------|
-| 6000 | `SamePlayer` | Player 1 and Player 2 cannot be the same |
-| 6001 | `InvalidWagerAmount` | Wager amount must be greater than 0 |
-| 6002 | `AlreadyDeposited` | Player has already deposited |
-| 6003 | `UnauthorizedPlayer` | Unauthorized player |
-| 6004 | `WagerAlreadySettled` | Wager has already been settled |
-| 6005 | `BothPlayersNotDeposited` | Both players must deposit before declaring winner/refunding |
-| 6006 | `UnauthorizedArbiter` | Unauthorized arbiter |
-| 6007 | `InvalidWinner` | Invalid winner (must be 1 or 2) |
-| 6008 | `TimeoutExpired` | Game timeout has expired, cannot declare winner |
-| 6009 | `TimeoutNotExpired` | Game timeout has not expired yet, cannot refund |
-| 6010 | `BothPlayersAlreadyDeposited` | Both players have already deposited, cannot cancel |
-| 6011 | `DepositTimeoutNotExpired` | Deposit timeout has not expired yet, cannot cancel |
-
-## Scalability & Performance
-
-For production deployments handling high volumes (100+ concurrent wagers), see [BOTTLENECKS_TO_FIX.md](./BOTTLENECKS_TO_FIX.md) for:
-- Known scalability bottlenecks
-- Fee recipient account contention solutions
-- Performance optimization strategies
-- Throughput improvements (5x-20x with minimal changes)
-
-**TL;DR:** For > 10 concurrent wagers, implement a fee recipient pool (5-20 wallets) to avoid account write contention.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues, questions, or contributions, please open an issue on GitHub.
-
----
-
-**⚠️ Disclaimer**: This smart contract is provided as-is. Always conduct thorough testing and audits before deploying to mainnet with real funds.

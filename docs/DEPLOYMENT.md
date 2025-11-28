@@ -103,22 +103,19 @@ anchor deploy --provider.cluster mainnet
 ### Initialize a Wager
 
 ```typescript
-// Derive wager PDA (stores game state)
+import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import * as anchor from "@coral-xyz/anchor";
+
+// Unique game ID (e.g., from your database or random)
+const gameId = new anchor.BN(12345);
+
+// Derive wager PDA (stores game state AND funds)
 const [wagerPda] = PublicKey.findProgramAddressSync(
   [
     Buffer.from("wager"),
     player1.publicKey.toBuffer(),
     player2.publicKey.toBuffer(),
-  ],
-  program.programId
-);
-
-// Derive vault PDA (stores deposited SOL)
-const [vaultPda] = PublicKey.findProgramAddressSync(
-  [
-    Buffer.from("vault"),
-    player1.publicKey.toBuffer(),
-    player2.publicKey.toBuffer(),
+    gameId.toArrayLike(Buffer, "le", 8),
   ],
   program.programId
 );
@@ -129,11 +126,11 @@ await program.methods
     player2.publicKey,
     arbiter.publicKey,
     feeRecipient.publicKey,
-    new anchor.BN(0.5 * LAMPORTS_PER_SOL) // 0.5 SOL per player
+    new anchor.BN(0.5 * LAMPORTS_PER_SOL), // 0.5 SOL per player
+    gameId
   )
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     payer: payer.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -148,7 +145,6 @@ await program.methods
   .depositPlayer1()
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     player1: player1.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -160,7 +156,6 @@ await program.methods
   .depositPlayer2()
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     player2: player2.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -175,10 +170,10 @@ await program.methods
   .declareWinner(1) // 1 for player1, 2 for player2
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
     arbiter: arbiter.publicKey,
     winnerAccount: player1.publicKey, // or player2.publicKey
     feeRecipient: feeRecipient.publicKey,
+    payerAccount: payer.publicKey, // Receives rent refund
     systemProgram: SystemProgram.programId,
   })
   .signers([arbiter])
@@ -192,9 +187,26 @@ await program.methods
   .refund()
   .accounts({
     wager: wagerPda,
-    vault: vaultPda,
+    arbiter: arbiter.publicKey, // Only arbiter can trigger refund in current version
     player1: player1.publicKey,
     player2: player2.publicKey,
+    payerAccount: payer.publicKey, // Receives rent refund
+    systemProgram: SystemProgram.programId,
+  })
+  .rpc();
+```
+
+### Cancel Wager (deposit timeout)
+
+```typescript
+await program.methods
+  .cancelWager()
+  .accounts({
+    wager: wagerPda,
+    arbiter: arbiter.publicKey, // Only arbiter can cancel
+    player1: player1.publicKey,
+    player2: player2.publicKey,
+    payerAccount: payer.publicKey, // Receives rent refund
     systemProgram: SystemProgram.programId,
   })
   .rpc();
@@ -202,23 +214,23 @@ await program.methods
 
 ## Security Considerations
 
-1. **Arbiter Trust**: The arbiter has significant power. Choose carefully.
-2. **Timeout Period**: 120 seconds is hardcoded. Modify if needed.
+1. **Arbiter Trust**: The arbiter has significant power (declare winner, refund, cancel). Choose carefully.
+2. **Timeout Period**: 120 seconds is hardcoded. Modify `TIMEOUT_SECONDS` in `lib.rs` if needed.
 3. **Fee Distribution**: 95% to winner, 5% to fee recipient.
-4. **PDA Seeds**: Each wager is uniquely identified by player1 and player2 pubkeys.
+4. **PDA Seeds**: Each wager is uniquely identified by player1, player2, and game_id.
 5. **Reentrancy**: Protected by account state checks.
 
 ## Troubleshooting
 
 ### "Error: Account does not exist"
 - Make sure the wager has been initialized first.
+- Verify you are using the correct `game_id` to derive the PDA.
 
 ### "Error: Unauthorized arbiter"
-- Only the designated arbiter can declare a winner.
+- Only the designated arbiter can declare a winner or refund/cancel.
 
 ### "Error: Timeout period has not expired"
 - Wait the full 120 seconds before attempting a refund.
 
 ### "Error: Player has already deposited"
 - Each player can only deposit once per wager.
-
